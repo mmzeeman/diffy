@@ -25,7 +25,10 @@
     pretty_html/1, 
     source_text/1, 
     destination_text/1,
-    levenshtein/1
+    levenshtein/1,
+
+    make_patch/1,
+    make_patch/2
 ]).
 
 -record(bisect_state, {
@@ -305,6 +308,21 @@ levenshtein([{delete, Data}|T], Insertions, Deletions, Levenshtein) ->
     levenshtein(T, Insertions, Deletions+text_size(Data), Levenshtein);
 levenshtein([{equal, _Data}|T], Insertions, Deletions, Levenshtein) ->
     levenshtein(T, 0, 0, Levenshtein+max(Insertions, Deletions)).
+
+
+% @doc
+make_patch(Diffs) when is_list(Diffs) ->
+    %% Reconstruct the source-text from the diffs.
+    make_patch(Diffs, source_text(Diffs)).
+
+make_patch(SourceText, DestinationText) when is_binary(SourceText) andalso is_binary(DestinationText) ->
+    Diffs = diff(SourceText, DestinationText),
+    Diffs1 = cleanup_semantic(Diffs),
+    Diffs2 = cleanup_efficiency(Diffs),
+    make_patch(Diffs2, SourceText);
+
+make_patch(Diffs, SourceText) when is_list(Diffs) andalso is_binary(SourceText) ->
+    throw(not_yet).
 
 
 %%
