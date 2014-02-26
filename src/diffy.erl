@@ -508,5 +508,19 @@ destination_text_test() ->
             {insert,<<"at">>}, {equal,<<" a banana">>}])),
     ok.
 
+levenshtein_test() ->
+    ?assertEqual(0, levenshtein([])),
+    ?assertEqual(5, levenshtein([{equal,<<"fruit flies ">>}, {delete,<<"lik">>}, 
+        {equal,<<"e">>}, {insert,<<"at">>}, {equal,<<" a banana">>}])),
+
+    % Levenshtein with trailing equality.
+    ?assertEqual(4, levenshtein([{delete, <<"abc">>}, {insert, <<"1234">>}, {equal, <<"xyz">>}])),
+    % Levenshtein with leading equality.
+    ?assertEqual(4, levenshtein([{equal, <<"xyz">>}, {delete, <<"abc">>}, {insert, <<"1234">>}])),
+    % Levenshtein with middle equality.
+    ?assertEqual(7, levenshtein([{delete, <<"abc">>}, {equal, <<"xyz">>}, {insert, <<"1234">>}])),
+
+    ok.
+
 
 -endif.
