@@ -24,7 +24,8 @@
     diff/2, 
     pretty_html/1, 
     source_text/1, 
-    destination_text/1
+    destination_text/1,
+    levenshtein/1
 ]).
 
 -record(bisect_state, {
@@ -74,7 +75,8 @@ compute_diff(OldText, NewText, CheckLines) ->
 
     case binary:match(LongText, ShortText) of
         {_Start, _Length} ->
-            throw(not_yet_short_text_inside_longtext); %% Optimization, shorttext is inside longtext
+            %% Optimization, shorttext is inside longtext
+            throw(not_yet_short_text_inside_longtext); 
         nomatch ->
             case size(ShortText) of
                 1 ->
@@ -121,7 +123,6 @@ compute_diff_bisect(A, B) when is_binary(A) andalso is_binary(B) ->
 
 compute_diff_bisect1(A, B, M, N) ->
     %% TODO, add deadline... 
-
     MaxD = (M + N) div 2,
 
     VOffset = MaxD,
@@ -238,6 +239,7 @@ compute_diff_bisect1(A, B, M, N) ->
 
     no_overlap.
 
+% @doc Split A and B and process the parts.
 diff_bisect_split(A, B, X, Y) ->
     A1 = binary_from_array(0, X, A),
     A2 = binary_from_array(0, Y, B),
@@ -291,6 +293,18 @@ destination_text([{delete, _Data}|T], Acc) ->
 destination_text([{_Op, Data}|T], Acc) ->
     destination_text(T, <<Acc/binary, Data/binary>>).
     
+% @doc Compute the Levenshtein distance, the number of inserted, deleted or substituted characters.
+levenshtein(Diffs) ->
+    levenshtein(Diffs, 0, 0, 0).
+
+levenshtein([], Insertions, Deletions, Levenshtein) ->
+    Levenshtein + max(Insertions, Deletions);
+levenshtein([{insert, Data}|T], Insertions, Deletions, Levenshtein) ->
+    levenshtein(T, Insertions+text_size(Data), Deletions, Levenshtein);
+levenshtein([{delete, Data}|T], Insertions, Deletions, Levenshtein) ->
+    levenshtein(T, Insertions, Deletions+text_size(Data), Levenshtein);
+levenshtein([{equal, _Data}|T], Insertions, Deletions, Levenshtein) ->
+    levenshtein(T, 0, 0, Levenshtein+max(Insertions, Deletions)).
 
 
 %%
