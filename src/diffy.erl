@@ -23,7 +23,11 @@
 -export([
     diff/2, 
     pretty_html/1, 
-    source_text/1, 
+    source_text/1,
+
+    cleanup_semantic/1,
+    cleanup_efficiency/1,
+
     destination_text/1,
     levenshtein/1,
 
@@ -310,6 +314,17 @@ levenshtein([{equal, _Data}|T], Insertions, Deletions, Levenshtein) ->
     levenshtein(T, 0, 0, Levenshtein+max(Insertions, Deletions)).
 
 
+%% 
+cleanup_merge(Diffs) ->
+    Diffs.
+
+cleanup_semantic(Diffs) ->
+    Diffs.
+
+cleanup_efficiency(Diffs) ->
+    Diffs.
+
+
 % @doc
 make_patch(Diffs) when is_list(Diffs) ->
     %% Reconstruct the source-text from the diffs.
@@ -318,7 +333,7 @@ make_patch(Diffs) when is_list(Diffs) ->
 make_patch(SourceText, DestinationText) when is_binary(SourceText) andalso is_binary(DestinationText) ->
     Diffs = diff(SourceText, DestinationText),
     Diffs1 = cleanup_semantic(Diffs),
-    Diffs2 = cleanup_efficiency(Diffs),
+    Diffs2 = cleanup_efficiency(Diffs1),
     make_patch(Diffs2, SourceText);
 
 make_patch(Diffs, SourceText) when is_list(Diffs) andalso is_binary(SourceText) ->
@@ -361,9 +376,7 @@ for(From, To, Step, Fun, State) ->
     end.
     
 
-%%
-cleanup_merge(Diffs) ->
-    Diffs.
+
     
 split_pre_and_suffix(Text1, Text2) ->
     Prefix = common_prefix(Text1, Text2),
