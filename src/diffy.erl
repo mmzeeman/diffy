@@ -42,6 +42,16 @@
     v2
 }).
 
+-record(patch, {
+    diffs = [],
+
+    start1 = 1,
+    start2 = 1,
+
+    length1 = 0,
+    length2 = 0
+}).
+
 % @doc Compute the difference between two binary texts
 %
 diff(Text1, Text2) ->
@@ -417,6 +427,10 @@ text_size(<<>>, Count) ->
 text_size(<<_C/utf8, Rest/binary>>, Count) ->
     text_size(Rest, Count+1).
 
+%%
+%% Array utilities
+%%
+
 % @doc
 array_from_binary(Bin) when is_binary(Bin) ->
     array_from_binary(Bin, 0, array:new()).
@@ -426,7 +440,7 @@ array_from_binary(<<>>, _N, Array) ->
 array_from_binary(<<C/utf8, Rest/binary>>, N, Array) ->
     array_from_binary(Rest, N+1, array:set(N, C, Array)).
 
-
+% @doc
 binary_from_array(Start, End, Array) ->
     binary_from_array(Start, End, Array, <<>>).
     
@@ -523,40 +537,7 @@ split_pre_and_suffix_test() ->
        split_pre_and_suffix(<<"aabbdd">>, <<"aacdd">>)),
     ok. 
 
-pretty_html_test() ->
-    ?assertEqual([], pretty_html([])),
-    ?assertEqual([<<"<span>>test</span>">>], pretty_html([{equal, <<"test">>}])),
-    ?assertEqual([<<"<del style='background:#ffe6e6;'>foo</del>">>, 
-        <<"<span>>test</span>">>], pretty_html([{delete, <<"foo">>}, {equal, <<"test">>}])),
-    ?assertEqual([<<"<ins style='background:#e6ffe6;'>foo</ins>">>, 
-        <<"<span>>test</span>">>], pretty_html([{insert, <<"foo">>}, {equal, <<"test">>}])),
-    ok.
 
-source_text_test() ->
-    ?assertEqual(<<"fruit flies like a banana">>, 
-        source_text([{equal,<<"fruit flies ">>}, {delete,<<"lik">>}, {equal,<<"e">>},
-            {insert,<<"at">>}, {equal,<<" a banana">>}])),
-    ok.
-
-destination_text_test() ->
-    ?assertEqual(<<"fruit flies eat a banana">>, 
-        destination_text([{equal,<<"fruit flies ">>}, {delete,<<"lik">>}, {equal,<<"e">>},
-            {insert,<<"at">>}, {equal,<<" a banana">>}])),
-    ok.
-
-levenshtein_test() ->
-    ?assertEqual(0, levenshtein([])),
-    ?assertEqual(5, levenshtein([{equal,<<"fruit flies ">>}, {delete,<<"lik">>}, 
-        {equal,<<"e">>}, {insert,<<"at">>}, {equal,<<" a banana">>}])),
-
-    % Levenshtein with trailing equality.
-    ?assertEqual(4, levenshtein([{delete, <<"abc">>}, {insert, <<"1234">>}, {equal, <<"xyz">>}])),
-    % Levenshtein with leading equality.
-    ?assertEqual(4, levenshtein([{equal, <<"xyz">>}, {delete, <<"abc">>}, {insert, <<"1234">>}])),
-    % Levenshtein with middle equality.
-    ?assertEqual(7, levenshtein([{delete, <<"abc">>}, {equal, <<"xyz">>}, {insert, <<"1234">>}])),
-
-    ok.
 
 
 -endif.
