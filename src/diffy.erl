@@ -22,18 +22,24 @@
 
 -export([
     diff/2, 
+
     pretty_html/1, 
     source_text/1,
+    destination_text/1,
 
     cleanup_semantic/1,
     cleanup_efficiency/1,
 
-    destination_text/1,
     levenshtein/1,
 
     make_patch/1,
     make_patch/2
 ]).
+
+-define(PATCH_MARGIN, 4).
+-define(PATCH_MAX_PATCH_LEN, 32).
+
+-define(MATCH_MAXBITS, 31).
 
 -record(bisect_state, {
     k1start = 0, k1end = 0,
@@ -45,8 +51,8 @@
 -record(patch, {
     diffs = [],
 
-    start1 = 1,
-    start2 = 1,
+    start1 = 0,
+    start2 = 0,
 
     length1 = 0,
     length2 = 0
@@ -324,10 +330,62 @@ levenshtein([{equal, _Data}|T], Insertions, Deletions, Levenshtein) ->
     levenshtein(T, 0, 0, Levenshtein+max(Insertions, Deletions)).
 
 
-%% 
+%@ @doc Cleanup diffs. 
+% Merge equal operations.
+%
 cleanup_merge(Diffs) ->
-    % TODO
-    Diffs.
+    cleanup_merge(Diffs, []). 
+
+%% Done
+cleanup_merge([], Acc) ->
+    lists:reverse(Acc);
+%% Merge data from equal operations
+cleanup_merge([{Op2, Data2}|T], [{Op1, Data1}|Acc]) when Op1 =:= Op2 ->
+    cleanup_merge(T, [{Op1, <<Data1/binary, Data2/binary>>}|Acc]);
+%% Cleanup edits before equal operation
+cleanup_merge([{Op1, Data1}|T], [{Op2, _}=I, {Op3, Data3}|Acc]) when Op1 =/= Op2 andalso Op1 =:= Op3 andalso Op2 =/= equal andalso Op3 =/= equal ->
+    cleanup_merge(T, [I, {Op3, <<Data3/binary, Data1/binary>>}|Acc]);
+%% Check if Op1Data and Op2Data have common prefixes.
+cleanup_merge([{equal, E1}|T], [{Op1, Op1Data}, {Op2, Op2Data}, {equal, E2}|Acc]) when Op1 =/= Op2 andalso Op1 =/= equal andalso Op2 =/= equal ->
+    {Prefix, Op1DataD, Op2DataD, Suffix} = split_pre_and_suffix(Op1Data, Op2Data),
+    cleanup_merge(T, [{equal, <<Suffix/binary, E1/binary>>}, 
+        {Op1, Op1DataD}, {Op2, Op2DataD}, {equal, <<E2/binary, Prefix/binary>>}|Acc]);
+%% Check for slide left and slide right edits
+cleanup_merge([{equal, E1}=H|T], [{Op, I}, {equal, E2}|AccTail]=Acc) when Op =:= insert orelse Op =:= delete ->
+    case is_suffix(E2, I) of
+        false ->
+            case is_prefix(E1, I) of
+                false ->
+                    cleanup_merge(T, [H|Acc]);
+                true ->
+                    P = size(E1),
+                    <<_:P/binary, Post/binary>> = I,
+                    cleanup_merge([{equal, <<E2/binary, E1/binary>>}, {Op, <<Post/binary, E1/binary>>}|T], AccTail)
+            end;
+        true ->
+            R = size(I) - size(E2),
+            <<Pre:R/binary,  Post/binary>> = I,
+            cleanup_merge([{Op, <<E2/binary, Pre/binary>>}, {equal, <<Post/binary, E1/binary>>}|T], AccTail)
+    end;
+cleanup_merge([H|T], Acc) ->
+    cleanup_merge(T, [H|Acc]).
+
+
+% @doc Return true iff A is a prefix of B
+is_prefix(<<>>, B) ->
+    true;
+is_prefix(A, B) when size(A) > size(B) ->
+    false;
+is_prefix(<<C1/utf8, ARest/binary>>, <<C2/utf8, BRest/binary>>) when C1 =:= C2 ->
+    is_prefix(ARest, BRest);
+is_prefix(_, _) ->
+    false.
+
+% @doc Return true iff A is a suffix of B
+is_suffix(A, B) when size(A) > size(B) ->
+    false;
+is_suffix(A, B) ->
+    size(A) =:= binary:longest_common_suffix([A, B]).
 
 cleanup_semantic(Diffs) ->
     % TODO
@@ -352,7 +410,117 @@ make_patch(SourceText, DestinationText) when is_binary(SourceText) andalso is_bi
 
 % @doc Creata a patch from a list of diffs and the source text.
 make_patch(Diffs, SourceText) when is_list(Diffs) andalso is_binary(SourceText) ->
+    make_patch(Diffs, SourceText, SourceText, 0, 0, [#patch{}]).
+
+make_patch([], _PrePatchText, _PostPatchText, Count1, Count2, [Patch|Rest]=Patches) ->
+    case Patch#patch.diffs of
+        [] -> 
+            lists:reverse(Rest);
+        _ -> 
+            lists:reverse(Patches)
+    end;
+    
+make_patch([{insert, Data}=D|T], PrePatchText, PostPatchText, Count1, Count2, [Patch|Rest]) ->
+    Diffs = [D|Patch#patch.diffs],
+    Size = size(Data),
+
+    L = Patch#patch.length2 + Size,
+    P = Patch#patch{diffs=Diffs, length2=L},
+
+    %% Insert the text into the postpatch text.
+    <<Pre:Count2/binary, Post/binary>> = PostPatchText,
+    NewPostPatchText = <<Pre/binary, Data/binary, Post/binary>>,
+
+    make_patch(T, PrePatchText, NewPostPatchText, Count1, Count2+Size, [P|Rest]);
+
+make_patch([{delete, Data}=D|T], PrePatchText, PostPatchText, Count1, Count2, [Patch|Rest]) ->
+    Diffs = [D|Patch#patch.diffs],
+    Size = size(Data),
+
+    L = Patch#patch.length1 + Size,
+    P = Patch#patch{diffs=Diffs, length1=L},
+
+    %% Remove the piece of text.
+    <<Pre:Count2/binary, _:Size/binary, Post/binary>> = PostPatchText,
+    NewPostPatchText = <<Pre/binary, Post/binary>>,
+    
+    make_patch(T, PrePatchText, NewPostPatchText, Count1+Size, Count2, [P|Rest]);
+
+make_patch([{equal, Data}=D|T], PrePatchText, PostPatchText, Count1, Count2, [Patch|Rest]) ->
+    Diffs = Patch#patch.diffs,
+    Size = size(Data),
+
+    case Size >= 2 * ?PATCH_MARGIN of
+        true ->
+            case Diffs of
+                [] ->
+                    throw(not_yet);
+                _ ->
+                    % Time for a new patch.
+                    throw(not_yet)
+            end;
+        false ->
+            throw(not_yet)
+    end,
+
+    L1 = Patch#patch.length1 + Size,
+    L2 = Patch#patch.length2 + Size,
+    
+    P = Patch#patch{diffs=Diffs, length1=L1, length2=L2},
+        
+    make_patch(T, PrePatchText, PostPatchText, Count1+Size, Count2+Size, [P|Rest]).
+
+%%
+add_context(Patch, <<>>) ->
+    %% Nothing to add.
+    Patch;
+add_context(Patch, Text) ->
+    Diffs = Patch#patch.diffs,
+    
+    Start = Patch#patch.start2,
+    Length = Patch#patch.length1,
+
+    <<_:Start/binary, Pattern:Length/binary, _/binary>> = Text,
+
+    {Prefix, Suffix} = match_padding(Pattern, Text, Start, Length, text_size(Pattern)),
+
+    %% Add the suffix to the list of patches.
+    Patch1 = case Suffix of
+        <<>> -> Patch;
+        _ -> Patch#patch{diffs=[{equal, Suffix}|Diffs]}
+    end,
+
+    %% Roll back start and end points.
+
+    %% Extend the length (in bytes) of the patch.
+
     throw(not_yet).
+
+
+match_padding(Pattern, Text, Start, BinLength, Utf8Length) ->
+    case unique_match(Pattern, Text) of
+        true ->
+            {<<>>, <<>>}; %% No padding was needed, we already have a unique pattern
+        false ->
+            %% increase the size of the pattern
+            throw(not_yet)
+    end.    
+    
+%%
+unique_match(Pattern, Text) ->
+    TextSize = size(Text),
+    case binary:match(Text, Pattern) of
+        nomatch -> 
+            error(nomatch);
+        {Start, Length} when Start + 1 + Length < TextSize ->
+            %% We have a match, and we can search..
+            case binary:match(Text, Pattern, [{scope, {Start+1, TextSize-Start-1}}]) of
+                nomatch -> true;
+                {_, _} -> false
+            end;
+        {_, _} ->
+            true
+    end.
 
 
 %%
@@ -389,16 +557,15 @@ for(From, To, Step, Fun, State) ->
         {break, S1} ->
             S1
     end.
-    
-
-
-    
+        
 split_pre_and_suffix(Text1, Text2) ->
     Prefix = common_prefix(Text1, Text2),
     Suffix = common_suffix(Text1, Text2),
     MiddleText1 = binary:part(Text1, size(Prefix), size(Text1) - size(Prefix) - size(Suffix)), 
     MiddleText2 = binary:part(Text2, size(Prefix), size(Text2) - size(Prefix) - size(Suffix)), 
     {Prefix, MiddleText1, MiddleText2, Suffix}.
+
+
 
     
 % @doc Return the common prefix of Text1 and Text2. (utf8 aware)
@@ -417,8 +584,7 @@ common_suffix(Text1, Text2) ->
     binary:part(Text1, size(Text1), -Length).
 
 
-% @doc Return the number of characters in Text, a utf8 binary
-
+% @doc Count the number of characters in a utf8 binary.
 text_size(Text) when is_binary(Text) ->
     text_size(Text, 0).
 
@@ -431,7 +597,7 @@ text_size(<<_C/utf8, Rest/binary>>, Count) ->
 %% Array utilities
 %%
 
-% @doc
+% @doc Create an array from a utf8 binary.
 array_from_binary(Bin) when is_binary(Bin) ->
     array_from_binary(Bin, 0, array:new()).
 
@@ -440,7 +606,7 @@ array_from_binary(<<>>, _N, Array) ->
 array_from_binary(<<C/utf8, Rest/binary>>, N, Array) ->
     array_from_binary(Rest, N+1, array:set(N, C, Array)).
 
-% @doc
+% @doc Create a binary from an array containing unicode characters.
 binary_from_array(Start, End, Array) ->
     binary_from_array(Start, End, Array, <<>>).
     
@@ -451,6 +617,10 @@ binary_from_array(_, _, _, Acc) ->
     Acc.
 
 
+%%
+%% Tests
+%%
+
 -ifdef(TEST).
 
 -include_lib("eunit/include/eunit.hrl").
@@ -459,7 +629,6 @@ for_test() ->
     ?assertEqual(9, for(0, 10, fun(I, _N) -> {continue, I} end, undefined)),
     ?assertEqual(0, for(0, 10, fun(I, _N) -> {break, I} end, undefined)),
     ok.
-
 
 array_test() ->
     ?assertEqual(20, array:size(array_from_binary(<<"de apen eten bananen">>))),
@@ -528,7 +697,9 @@ common_suffix_test() ->
 
 split_pre_and_suffix_test() ->
     ?assertEqual({<<>>, <<>>, <<>>, <<>>}, split_pre_and_suffix(<<>>, <<>>)),
+
     ?assertEqual({<<>>, <<"a">>, <<"b">>, <<>>}, split_pre_and_suffix(<<"a">>, <<"b">>)),
+    
     ?assertEqual({<<"a">>, <<"b">>, <<"c">>, <<"d">>}, 
        split_pre_and_suffix(<<"abd">>, <<"acd">>)),
     ?assertEqual({<<"aa">>, <<"bb">>, <<"cc">>, <<"dd">>}, 
@@ -537,6 +708,55 @@ split_pre_and_suffix_test() ->
        split_pre_and_suffix(<<"aabbdd">>, <<"aacdd">>)),
     ok. 
 
+unique_match_test() ->
+    ?assertEqual(true, unique_match(<<"a">>, <<"abc">>)),
+    ?assertEqual(true, unique_match(<<"b">>, <<"abc">>)),
+    ?assertEqual(true, unique_match(<<"c">>, <<"abc">>)),
+    ?assertEqual(false, unique_match(<<"ab">>, <<"abab">>)),
+    ok.
+
+cleanup_merge_test() ->
+    % no change..
+    ?assertEqual([], cleanup_merge([])),
+
+    % no change
+    ?assertEqual([{equal, <<"a">>}, {delete, <<"b">>}, {insert, <<"c">>}], 
+        cleanup_merge([{equal, <<"a">>}, {delete, <<"b">>}, {insert, <<"c">>}])),
+
+    % Merge equalities
+    ?assertEqual([{equal, <<"abc">>}], 
+        cleanup_merge([{equal, <<"a">>}, {equal, <<"b">>}, {equal, <<"c">>}])),
+    ?assertEqual([{delete, <<"abc">>}], 
+        cleanup_merge([{delete, <<"a">>}, {delete, <<"b">>}, {delete, <<"c">>}])),
+    ?assertEqual([{insert, <<"abc">>}], 
+        cleanup_merge([{insert, <<"a">>}, {insert, <<"b">>}, {insert, <<"c">>}])),
+
+    % Merge interweaves before equal operations
+    ?assertEqual([{delete, <<"ac">>}, {insert, <<"bd">>}, {equal, <<"ef">>}], 
+        cleanup_merge([{delete, <<"a">>}, {insert, <<"b">>}, {delete, <<"c">>}, {insert, <<"d">>}, 
+            {equal, <<"e">>}, {equal, <<"f">>}])),
+
+    % Prefix and suffix detection with equalities.
+    ?assertEqual([{equal, <<"xa">>}, {delete, <<"d">>}, {insert, <<"b">>}, {equal, <<"cy">>}], 
+        cleanup_merge([{equal, <<"x">>}, {delete, <<"a">>}, {insert, <<"abc">>}, {delete, <<"dc">>}, {equal, <<"y">>}])),
+
+    % Slide left edit
+    ?assertEqual([{insert, <<"ab">>}, {equal, <<"ac">>}],
+        cleanup_merge([{equal, <<"a">>}, {insert, <<"ba">>}, {equal, <<"c">>}])),
+
+    % Slide right edit
+    ?assertEqual([{equal, <<"ca">>}, {insert, <<"ba">>}],
+        cleanup_merge([{equal, <<"c">>}, {insert, <<"ab">>}, {equal, <<"a">>}])),
+
+    % Slide edit left recursive.
+    ?assertEqual([{delete, <<"abc">>}, {equal, <<"acx">>}],
+        cleanup_merge([{equal, <<"a">>}, {delete, <<"b">>}, {equal, <<"c">>}, {delete, <<"ac">>}, {equal, <<"x">>}])),
+
+    % Slide edit right recursive
+    ?assertEqual([{equal, <<"xca">>}, {delete, <<"cba">>}],
+        cleanup_merge([{equal, <<"x">>}, {delete, <<"ca">>}, {equal, <<"c">>}, {delete, <<"b">>}, {equal, <<"a">>}])),
+
+    ok.
 
 
 

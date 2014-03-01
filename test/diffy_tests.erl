@@ -58,3 +58,15 @@ levenshtein_test() ->
     ?assertEqual(7, diffy:levenshtein([{delete, <<"abc">>}, {equal, <<"xyz">>}, {insert, <<"1234">>}])),
 
     ok.
+
+make_patch_test() ->
+	%% No patches...
+	?assertEqual([], diffy:make_patch([])),
+
+	%% Source and destination text is the same.
+	?assertEqual([], diffy:make_patch(<<>>, <<"abc">>)),
+
+	%% Source and destination text is the same.
+	?assertEqual([], diffy:make_patch(<<"abc">>, <<"abc">>)),
+
+	ok.
