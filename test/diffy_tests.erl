@@ -20,6 +20,7 @@
 
 -module(diffy_tests).
 
+-include_lib("proper/include/proper.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 
@@ -70,3 +71,66 @@ make_patch_test() ->
 	?assertEqual([], diffy:make_patch(<<"abc">>, <<"abc">>)),
 
 	ok.
+
+
+cleanup_merge(Diffs) ->
+    diffy:cleanup_merge(Diffs).
+    
+cleanup_merge_test() ->
+    % no change..
+    ?assertEqual([], cleanup_merge([])),
+
+    % no change
+    ?assertEqual([{equal, <<"a">>}, {delete, <<"b">>}, {insert, <<"c">>}], 
+        cleanup_merge([{equal, <<"a">>}, {delete, <<"b">>}, {insert, <<"c">>}])),
+
+    % Merge equalities
+    ?assertEqual([{equal, <<"abc">>}], 
+        cleanup_merge([{equal, <<"a">>}, {equal, <<"b">>}, {equal, <<"c">>}])),
+    ?assertEqual([{delete, <<"abc">>}], 
+        cleanup_merge([{delete, <<"a">>}, {delete, <<"b">>}, {delete, <<"c">>}])),
+    ?assertEqual([{insert, <<"abc">>}], 
+        cleanup_merge([{insert, <<"a">>}, {insert, <<"b">>}, {insert, <<"c">>}])),
+
+    % Merge interweaves before equal operations
+    ?assertEqual([{delete, <<"ac">>}, {insert, <<"bd">>}, {equal, <<"ef">>}], 
+        cleanup_merge([{delete, <<"a">>}, {insert, <<"b">>}, {delete, <<"c">>}, {insert, <<"d">>}, 
+            {equal, <<"e">>}, {equal, <<"f">>}])),
+
+    % Prefix and suffix detection with equalities.
+    ?assertEqual([{equal, <<"xa">>}, {delete, <<"d">>}, {insert, <<"b">>}, {equal, <<"cy">>}], 
+        cleanup_merge([{equal, <<"x">>}, {delete, <<"a">>}, {insert, <<"abc">>}, {delete, <<"dc">>}, {equal, <<"y">>}])),
+
+    % Slide left edit
+    ?assertEqual([{insert, <<"ab">>}, {equal, <<"ac">>}],
+        cleanup_merge([{equal, <<"a">>}, {insert, <<"ba">>}, {equal, <<"c">>}])),
+
+    % Slide right edit
+    ?assertEqual([{equal, <<"ca">>}, {insert, <<"ba">>}],
+        cleanup_merge([{equal, <<"c">>}, {insert, <<"ab">>}, {equal, <<"a">>}])),
+
+    % Slide edit left recursive.
+    ?assertEqual([{delete, <<"abc">>}, {equal, <<"acx">>}],
+        cleanup_merge([{equal, <<"a">>}, {delete, <<"b">>}, {equal, <<"c">>}, {delete, <<"ac">>}, {equal, <<"x">>}])),
+
+    % Slide edit right recursive
+    ?assertEqual([{equal, <<"xca">>}, {delete, <<"cba">>}],
+        cleanup_merge([{equal, <<"x">>}, {delete, <<"ca">>}, {equal, <<"c">>}, {delete, <<"b">>}, {equal, <<"a">>}])),
+
+    ok.
+
+prop_cleanup_merge() ->
+    ?FORALL(Diffs, diffy:diffs(),
+        begin
+            SourceText = diffy:source_text(Diffs),
+            DestinationText = diffy:destination_text(Diffs),
+
+            CleanDiffs = cleanup_merge(Diffs),
+
+            SourceText == diffy:source_text(CleanDiffs) andalso
+            DestinationText == diffy:destination_text(CleanDiffs)
+        end).
+
+cleanup_merge_prop_test() ->
+    ?assertEqual(true, proper:quickcheck(prop_cleanup_merge(), [{numtests, 1000}, {to_file, user}])),
+    ok.

@@ -27,6 +27,7 @@
     source_text/1,
     destination_text/1,
 
+    cleanup_merge/1,
     cleanup_semantic/1,
     cleanup_efficiency/1,
 
@@ -35,6 +36,11 @@
     make_patch/1,
     make_patch/2
 ]).
+
+-type diff() :: {delete, unicode:unicode_binary()} | {equal, unicode:unicode_binary()} | {insert, unicode:unicode_binary()}.
+-type diffs() :: list(diff()).
+
+-export_type([diffs/0]).
 
 -define(PATCH_MARGIN, 4).
 -define(PATCH_MAX_PATCH_LEN, 32).
@@ -331,14 +337,18 @@ levenshtein([{equal, _Data}|T], Insertions, Deletions, Levenshtein) ->
 
 
 %@ @doc Cleanup diffs. 
-% Merge equal operations.
+% Remove empty operations, merge equal opearations, edits before equal operation and common prefix operations.
 %
+-spec cleanup_merge(diffs()) -> diffs().
 cleanup_merge(Diffs) ->
     cleanup_merge(Diffs, []). 
 
 %% Done
 cleanup_merge([], Acc) ->
     lists:reverse(Acc);
+%% Remove operations without data.
+cleanup_merge([{Op, <<>>}|T], Acc) ->
+    cleanup_merge(T, Acc);
 %% Merge data from equal operations
 cleanup_merge([{Op2, Data2}|T], [{Op1, Data1}|Acc]) when Op1 =:= Op2 ->
     cleanup_merge(T, [{Op1, <<Data1/binary, Data2/binary>>}|Acc]);
@@ -714,50 +724,5 @@ unique_match_test() ->
     ?assertEqual(true, unique_match(<<"c">>, <<"abc">>)),
     ?assertEqual(false, unique_match(<<"ab">>, <<"abab">>)),
     ok.
-
-cleanup_merge_test() ->
-    % no change..
-    ?assertEqual([], cleanup_merge([])),
-
-    % no change
-    ?assertEqual([{equal, <<"a">>}, {delete, <<"b">>}, {insert, <<"c">>}], 
-        cleanup_merge([{equal, <<"a">>}, {delete, <<"b">>}, {insert, <<"c">>}])),
-
-    % Merge equalities
-    ?assertEqual([{equal, <<"abc">>}], 
-        cleanup_merge([{equal, <<"a">>}, {equal, <<"b">>}, {equal, <<"c">>}])),
-    ?assertEqual([{delete, <<"abc">>}], 
-        cleanup_merge([{delete, <<"a">>}, {delete, <<"b">>}, {delete, <<"c">>}])),
-    ?assertEqual([{insert, <<"abc">>}], 
-        cleanup_merge([{insert, <<"a">>}, {insert, <<"b">>}, {insert, <<"c">>}])),
-
-    % Merge interweaves before equal operations
-    ?assertEqual([{delete, <<"ac">>}, {insert, <<"bd">>}, {equal, <<"ef">>}], 
-        cleanup_merge([{delete, <<"a">>}, {insert, <<"b">>}, {delete, <<"c">>}, {insert, <<"d">>}, 
-            {equal, <<"e">>}, {equal, <<"f">>}])),
-
-    % Prefix and suffix detection with equalities.
-    ?assertEqual([{equal, <<"xa">>}, {delete, <<"d">>}, {insert, <<"b">>}, {equal, <<"cy">>}], 
-        cleanup_merge([{equal, <<"x">>}, {delete, <<"a">>}, {insert, <<"abc">>}, {delete, <<"dc">>}, {equal, <<"y">>}])),
-
-    % Slide left edit
-    ?assertEqual([{insert, <<"ab">>}, {equal, <<"ac">>}],
-        cleanup_merge([{equal, <<"a">>}, {insert, <<"ba">>}, {equal, <<"c">>}])),
-
-    % Slide right edit
-    ?assertEqual([{equal, <<"ca">>}, {insert, <<"ba">>}],
-        cleanup_merge([{equal, <<"c">>}, {insert, <<"ab">>}, {equal, <<"a">>}])),
-
-    % Slide edit left recursive.
-    ?assertEqual([{delete, <<"abc">>}, {equal, <<"acx">>}],
-        cleanup_merge([{equal, <<"a">>}, {delete, <<"b">>}, {equal, <<"c">>}, {delete, <<"ac">>}, {equal, <<"x">>}])),
-
-    % Slide edit right recursive
-    ?assertEqual([{equal, <<"xca">>}, {delete, <<"cba">>}],
-        cleanup_merge([{equal, <<"x">>}, {delete, <<"ca">>}, {equal, <<"c">>}, {delete, <<"b">>}, {equal, <<"a">>}])),
-
-    ok.
-
-
 
 -endif.
