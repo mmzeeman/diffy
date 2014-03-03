@@ -66,6 +66,7 @@
 
 % @doc Compute the difference between two binary texts
 %
+-spec diff(unicode:unicode_binary(), unicode:unicode_binary()) -> diffs().
 diff(Text1, Text2) ->
     diff(Text1, Text2, true).
 
@@ -282,6 +283,7 @@ diff_bisect_split(A, B, X, Y) ->
     Diffs ++ DiffsB.
 
 % @doc Convert the diffs into a pretty html report
+-spec pretty_html(diffs()) -> iolist().
 pretty_html(Diffs) ->
     pretty_html(Diffs, []).
 
@@ -380,27 +382,20 @@ cleanup_merge([{equal, E1}=H|T], [{Op, I}, {equal, E2}|AccTail]=Acc) when Op =:=
 cleanup_merge([H|T], Acc) ->
     cleanup_merge(T, [H|Acc]).
 
-
-% @doc Return true iff A is a prefix of B
-is_prefix(<<>>, B) ->
-    true;
-is_prefix(A, B) when size(A) > size(B) ->
-    false;
-is_prefix(<<C1/utf8, ARest/binary>>, <<C2/utf8, BRest/binary>>) when C1 =:= C2 ->
-    is_prefix(ARest, BRest);
-is_prefix(_, _) ->
-    false.
-
-% @doc Return true iff A is a suffix of B
-is_suffix(A, B) when size(A) > size(B) ->
-    false;
-is_suffix(A, B) ->
-    size(A) =:= binary:longest_common_suffix([A, B]).
-
+% @doc Do semantic cleanup of diffs
+%
+-spec cleanup_semantic(diffs()) -> diffs().
 cleanup_semantic(Diffs) ->
-    % TODO
-    Diffs.
+    cleanup_semantic(Diffs, []).
 
+cleanup_semantic([], Acc) ->
+    lists:reverse(Acc);
+cleanup_semantic([H|T], Acc) ->
+    cleanup_semantic(T, [H|Acc]).
+
+% @doc Do efficiency cleanup of diffs.
+%
+-spec cleanup_efficiency(diffs()) -> diffs().
 cleanup_efficiency(Diffs) ->
     % TODO
     Diffs.
@@ -537,6 +532,23 @@ unique_match(Pattern, Text) ->
 %% Helpers
 %%
 
+% @doc Return true iff A is a prefix of B
+is_prefix(<<>>, B) ->
+    true;
+is_prefix(A, B) when size(A) > size(B) ->
+    false;
+is_prefix(<<C1/utf8, ARest/binary>>, <<C2/utf8, BRest/binary>>) when C1 =:= C2 ->
+    is_prefix(ARest, BRest);
+is_prefix(_, _) ->
+    false.
+
+% @doc Return true iff A is a suffix of B
+is_suffix(A, B) when size(A) > size(B) ->
+    false;
+is_suffix(A, B) ->
+    size(A) =:= binary:longest_common_suffix([A, B]).
+
+
 match_front(X1, Y1, A, M, B, N) when X1 < M andalso Y1 < N ->
     case array:get(X1, A) =:= array:get(Y1, B) of
         true -> match_front(X1+1, Y1+1, A, M, B, N);
@@ -574,8 +586,6 @@ split_pre_and_suffix(Text1, Text2) ->
     MiddleText1 = binary:part(Text1, size(Prefix), size(Text1) - size(Prefix) - size(Suffix)), 
     MiddleText2 = binary:part(Text2, size(Prefix), size(Text2) - size(Prefix) - size(Suffix)), 
     {Prefix, MiddleText1, MiddleText2, Suffix}.
-
-
 
     
 % @doc Return the common prefix of Text1 and Text2. (utf8 aware)

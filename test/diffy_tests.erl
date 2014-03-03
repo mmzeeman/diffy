@@ -23,6 +23,25 @@
 -include_lib("proper/include/proper.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
+%%
+%% Properties
+%%
+
+prop_cleanup_merge() ->
+    ?FORALL(Diffs, diffy:diffs(),
+        begin
+            SourceText = diffy:source_text(Diffs),
+            DestinationText = diffy:destination_text(Diffs),
+
+            CleanDiffs = cleanup_merge(Diffs),
+
+            SourceText == diffy:source_text(CleanDiffs) andalso
+            DestinationText == diffy:destination_text(CleanDiffs)
+        end).
+
+%%
+%% Tests
+%%
 
 pretty_html_test() ->
     ?assertEqual([], diffy:pretty_html([])),
@@ -65,17 +84,13 @@ make_patch_test() ->
 	?assertEqual([], diffy:make_patch([])),
 
 	%% Source and destination text is the same.
-	?assertEqual([], diffy:make_patch(<<>>, <<"abc">>)),
+	% ?assertEqual([], diffy:make_patch(<<>>, <<"abc">>)),
 
 	%% Source and destination text is the same.
-	?assertEqual([], diffy:make_patch(<<"abc">>, <<"abc">>)),
+	% ?assertEqual([], diffy:make_patch(<<"abc">>, <<"abc">>)),
 
 	ok.
-
-
-cleanup_merge(Diffs) ->
-    diffy:cleanup_merge(Diffs).
-    
+ 
 cleanup_merge_test() ->
     % no change..
     ?assertEqual([], cleanup_merge([])),
@@ -119,18 +134,38 @@ cleanup_merge_test() ->
 
     ok.
 
-prop_cleanup_merge() ->
-    ?FORALL(Diffs, diffy:diffs(),
-        begin
-            SourceText = diffy:source_text(Diffs),
-            DestinationText = diffy:destination_text(Diffs),
-
-            CleanDiffs = cleanup_merge(Diffs),
-
-            SourceText == diffy:source_text(CleanDiffs) andalso
-            DestinationText == diffy:destination_text(CleanDiffs)
-        end).
-
 cleanup_merge_prop_test() ->
-    ?assertEqual(true, proper:quickcheck(prop_cleanup_merge(), [{numtests, 1000}, {to_file, user}])),
+    ?assertEqual(true, proper:quickcheck(prop_cleanup_merge(), [{numtests, 500}, {to_file, user}])),
     ok.
+
+cleanup_semantic_test() ->
+    % No diffs case
+    ?assertEqual([], cleanup_semantic([])),
+
+    % No elimination #1.
+    ?assertEqual([{delete, <<"ab">>}, {insert, <<"cd">>}, {equal, <<"12">>}, {delete, <<"e">>}],
+        cleanup_semantic([{delete, <<"ab">>}, {insert, <<"cd">>}, {equal, <<"12">>}, {delete, <<"e">>}])),
+
+    % No elimination #2. 
+    ?assertEqual([{delete, <<"abc">>}, {insert, <<"ABC">>}, {equal, <<"1234">>}, {delete, <<"wxyz">>}], 
+        cleanup_semantic([{delete, <<"abc">>}, {insert, <<"ABC">>}, {equal, <<"1234">>}, {delete, <<"wxyz">>}])),
+
+    % Simple elimination.
+    ?assertEqual([{delete, <<"abc">>}, {insert, <<"b">>}], 
+        cleanup_semantic([{delete, <<"a">>}, {equal, <<"b">>}, {delete, <<"c">>}])),
+
+    % Multiple eliminations.
+    ?assertEqual([{delete, <<"AB_AB">>}, {insert, <<"1A2_1A2">>}], 
+        cleanup_semantic([{insert, <<"1">>}, {equal, <<"A">>}, {delete, <<"B">>}, {insert, <<"2">>}, 
+            {equal, <<"_">>}, {insert, <<"1">>}, {equal, <<"A">>}, {delete, <<"B">>}, {insert, <<"2">>}])),
+
+    ok.
+%%
+%% Helpers
+%%
+
+cleanup_semantic(Diffs) ->
+    diffy:cleanup_semantic(Diffs).
+
+cleanup_merge(Diffs) ->
+    diffy:cleanup_merge(Diffs).
