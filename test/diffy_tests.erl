@@ -39,6 +39,18 @@ prop_cleanup_merge() ->
             DestinationText == diffy:destination_text(CleanDiffs)
         end).
 
+prop_cleanup_efficiency() ->
+    ?FORALL(Diffs, diffy:diffs(),
+        begin
+            SourceText = diffy:source_text(Diffs),
+            DestinationText = diffy:destination_text(Diffs),
+
+            EfficientDiffs = cleanup_efficiency(Diffs),
+
+            SourceText == diffy:source_text(EfficientDiffs) andalso
+            DestinationText == diffy:destination_text(EfficientDiffs)
+        end).
+
 %%
 %% Tests
 %%
@@ -150,19 +162,51 @@ cleanup_semantic_test() ->
     ?assertEqual([{delete, <<"abc">>}, {insert, <<"ABC">>}, {equal, <<"1234">>}, {delete, <<"wxyz">>}], 
         cleanup_semantic([{delete, <<"abc">>}, {insert, <<"ABC">>}, {equal, <<"1234">>}, {delete, <<"wxyz">>}])),
 
-    % Simple elimination.
-    ?assertEqual([{delete, <<"abc">>}, {insert, <<"b">>}], 
-        cleanup_semantic([{delete, <<"a">>}, {equal, <<"b">>}, {delete, <<"c">>}])),
+    % % Simple elimination.
+    % ?assertEqual([{delete, <<"abc">>}, {insert, <<"b">>}], 
+    %     cleanup_semantic([{delete, <<"a">>}, {equal, <<"b">>}, {delete, <<"c">>}])),
 
-    % Multiple eliminations.
-    ?assertEqual([{delete, <<"AB_AB">>}, {insert, <<"1A2_1A2">>}], 
-        cleanup_semantic([{insert, <<"1">>}, {equal, <<"A">>}, {delete, <<"B">>}, {insert, <<"2">>}, 
-            {equal, <<"_">>}, {insert, <<"1">>}, {equal, <<"A">>}, {delete, <<"B">>}, {insert, <<"2">>}])),
+    % % Multiple eliminations.
+    % ?assertEqual([{delete, <<"AB_AB">>}, {insert, <<"1A2_1A2">>}], 
+    %     cleanup_semantic([{insert, <<"1">>}, {equal, <<"A">>}, {delete, <<"B">>}, {insert, <<"2">>}, 
+    %         {equal, <<"_">>}, {insert, <<"1">>}, {equal, <<"A">>}, {delete, <<"B">>}, {insert, <<"2">>}])),
 
     ok.
+
+cleanup_efficiency_prop_test() ->
+    ?assertEqual(true, proper:quickcheck(prop_cleanup_efficiency(), [{numtests, 500}, {to_file, user}])),
+    ok.
+
+cleanup_efficiency_test() ->
+    % Null case
+    ?assertEqual([], cleanup_semantic([])),
+
+    % No elimination.
+    Diffs = [{delete, <<"ab">>}, {insert, <<"12">>}, {equal, <<"wxyz">>}, {delete, <<"cd">>}, {insert, <<"34">>}],
+    ?assertEqual(Diffs, cleanup_efficiency(Diffs)),
+
+    % Four-edit elimination
+    ?assertEqual([{delete, <<"abxyzcd">>}, {insert, <<"12xyz34">>}], 
+        cleanup_efficiency([{delete, <<"ab">>}, {insert, <<"12">>}, {equal, <<"xyz">>}, {delete, <<"cd">>}, {insert, <<"34">>}])),
+
+    % Three-edit elimination
+    ?assertEqual([{insert, <<"12x34">>}, {delete, <<"xcd">>}], 
+        cleanup_efficiency([{insert, <<"12">>}, {equal, <<"x">>}, {delete, <<"cd">>}, {insert, <<"34">>}])),
+
+    % Backpass elimination
+    % ?assertEqual([{delete, <<"abxyzcd">>}, {insert, <<"12wxyz34">>}],
+    %     cleanup_efficiency([{delete, <<"ab">>}, {insert, <<"12">>}, {equal, <<"xy">>}, {insert, <<"34">>}, 
+    %         {equal, <<"z">>}, {delete, <<"cd">>}, {insert, <<"56">>}])),
+
+    ok.
+
+
 %%
 %% Helpers
 %%
+
+cleanup_efficiency(Diffs) ->
+    diffy:cleanup_efficiency(Diffs).
 
 cleanup_semantic(Diffs) ->
     diffy:cleanup_semantic(Diffs).

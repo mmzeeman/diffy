@@ -21,15 +21,19 @@
 -module(diffy).
 
 -export([
-    diff/2, 
+    diff/2,
+    diff_bisect/2,
 
-    pretty_html/1, 
+    pretty_html/1,
+
     source_text/1,
     destination_text/1,
 
     cleanup_merge/1,
     cleanup_semantic/1,
+
     cleanup_efficiency/1,
+    cleanup_efficiency/2,
 
     levenshtein/1,
 
@@ -37,7 +41,8 @@
     make_patch/2
 ]).
 
--type diff() :: {delete, unicode:unicode_binary()} | {equal, unicode:unicode_binary()} | {insert, unicode:unicode_binary()}.
+-type diff_op() :: delete | equal | insert.
+-type diff() :: {diff_op(), unicode:unicode_binary()}.
 -type diffs() :: list(diff()).
 
 -export_type([diffs/0]).
@@ -46,6 +51,8 @@
 -define(PATCH_MAX_PATCH_LEN, 32).
 
 -define(MATCH_MAXBITS, 31).
+
+-define(IS_INS_OR_DEL(Op), (Op =:= insert orelse Op =:= delete)).
 
 -record(bisect_state, {
     k1start = 0, k1end = 0,
@@ -122,7 +129,7 @@ compute_diff1(Text1, Text2, true) ->
 compute_diff1(Text1, Text2, false) when size(Text1) > 100 orelse size(Text2) > 100 ->
     compute_diff_linemode(Text1, Text2);
 compute_diff1(Text1, Text2, false) ->
-    compute_diff_bisect(Text1, Text2).
+    diff_bisect(Text1, Text2).
 
 %%
 compute_diff_linemode(_Text1, _Text2) ->
@@ -140,7 +147,7 @@ compute_diff_linemode(_Text1, _Text2) ->
 %%    Returns:
 %%      Array of diff tuples.
 %%    """
-compute_diff_bisect(A, B) when is_binary(A) andalso is_binary(B) ->
+diff_bisect(A, B) when is_binary(A) andalso is_binary(B) ->
     ArrA = array_from_binary(A),
     ArrB = array_from_binary(B),
     try compute_diff_bisect1(ArrA, ArrB, array:size(ArrA), array:size(ArrB)) of
@@ -397,9 +404,69 @@ cleanup_semantic([H|T], Acc) ->
 %
 -spec cleanup_efficiency(diffs()) -> diffs().
 cleanup_efficiency(Diffs) ->
-    % TODO
-    Diffs.
+    cleanup_efficiency(Diffs, 4).
 
+cleanup_efficiency(Diffs, EditCost) ->
+    cleanup_efficiency(Diffs, false, EditCost, []).
+
+% Five types to be split:
+% {insert, A}, {delete, B}, {equal, XY}, {insert, C}, {delete, D}
+% {insert, A}, {equal, X}, {insert, C}, {delete, D}
+% {insert, A}, {delete, B}, {equal, X}, {insert, C}
+% {insert, A}, {delete, B}, {equal, X}, {insert, C}, {delete, D}
+% {insert, A}, {delete, B}, {equal, X}, {delete, C}
+
+%% Done.
+cleanup_efficiency([], Changed, _EditCost, Acc) ->
+    Diffs = lists:reverse(Acc),
+    case Changed of
+        false -> Diffs;
+        true -> cleanup_merge(Diffs)
+    end;
+%% Any equality which is surrounded on both sides by an insertion and deletion need less then 
+%% EditCost characters for it to be advantageous to split.
+cleanup_efficiency([{Op1, _}=H, {equal, XY}=E, {Op2, _}=I|T], Changed, EditCost, Acc) when 
+        Op1 =/= Op2 andalso ?IS_INS_OR_DEL(Op1) andalso ?IS_INS_OR_DEL(Op2) ->
+    case text_smaller_than(XY, EditCost) of
+        true ->
+            %% Split
+            Delete = {delete, XY},
+            Insert = {insert, XY},
+
+            cleanup_efficiency([Insert, I | T], true, EditCost, [Delete, H | Acc]);
+        false ->
+            %% Equal is big enough, move delete and equal out of the way.
+            cleanup_efficiency([I | T], Changed, EditCost, [E, H |Acc])
+    end;
+%% Any equality which is surrounded on one side by an existing insertion and deletion and on the 
+%% other side by an exisiting insertion or deletion needs by less than half C characters long for it 
+%% to be advantagous to split.
+% cleanup_efficiency([{O1, _}=A, {O2, _}=B, {equal, X}=E, {O3, _}=C | T], Changed, EditCost, Acc) when
+%     O1 =/= O2 andalso ?IS_INS_OR_DEL(O1) andalso ?IS_INS_OR_DEL(O2) andalso ?IS_INS_OR_DEL(O3) ->
+%     case text_smaller_than(X, EditCost div 2) of
+%         true ->
+%             %% Split
+%             Del = {delete, X},
+%             Ins = {insert, X},
+%             cleanup_efficiency([Ins, C | T], true, EditCost, [Del, B, A | Acc]);
+%         false ->
+%             %% Equal is big enough, move delete and equal out of the way.
+%             cleanup_efficiency([C | T], Changed, EditCost, [E, B, A |Acc])
+%     end;
+cleanup_efficiency([H|T], Changed, EditCost, Acc) ->
+    cleanup_efficiency(T, Changed, EditCost, [H|Acc]).
+
+
+% @doc Return true iff the text is smaller than specified 
+text_smaller_than(_, 0) ->
+    false;
+text_smaller_than(<<>>, _Size) ->
+    true;
+text_smaller_than(<<_C/utf8, Rest/binary>>, Size) when Size > 0 ->
+    text_smaller_than(Rest, Size-1);
+text_smaller_than(<<_C, Rest/binary>>, Size) when Size > 0 ->
+    %% Illegal utf-8 string, just count this as a single character and continue
+    text_smaller_than(Rest, Size-1).
 
 % @doc create a patch from a list of diffs
 make_patch(Diffs) when is_list(Diffs) ->
@@ -696,12 +763,12 @@ diff_utf8_test() ->
 
     ok.
 
-compute_diff_bisect_test() ->
+diff_bisect_test() ->
     ?assertEqual([{equal,<<"fruit flies ">>},
                   {delete,<<"lik">>},
                   {equal,<<"e">>},
                   {insert,<<"at">>},
-                  {equal,<<" a banana">>}], compute_diff_bisect(<<"fruit flies like a banana">>, 
+                  {equal,<<" a banana">>}], diff_bisect(<<"fruit flies like a banana">>, 
         <<"fruit flies eat a banana">>)),
     ok.
 
@@ -734,5 +801,27 @@ unique_match_test() ->
     ?assertEqual(true, unique_match(<<"c">>, <<"abc">>)),
     ?assertEqual(false, unique_match(<<"ab">>, <<"abab">>)),
     ok.
+
+text_smaller_than_test() ->
+    ?assertEqual(true, text_smaller_than(<<>>, 5)),
+    ?assertEqual(true, text_smaller_than(<<>>, 1)),
+
+    ?assertEqual(false, text_smaller_than(<<>>, 0)),
+
+    ?assertEqual(false, text_smaller_than(<<"abc">>, 0)),
+    ?assertEqual(false, text_smaller_than(<<"abc">>, 1)),
+    ?assertEqual(true, text_smaller_than(<<"abc">>, 4)),
+
+    %% Test if we count characters.
+    Utf8Binary = <<1046/utf8, 1011/utf8, 1022/utf8, 127/utf8>>,
+    ?assertEqual(true, size(Utf8Binary) > 5),
+    ?assertEqual(true, text_smaller_than(Utf8Binary, 5)),
+    ?assertEqual(false, text_smaller_than(Utf8Binary, 4)),
+
+    %% Test illegal utf8 sequence, the chars are counted as normal chars
+    ?assertEqual(false, text_smaller_than(<<149,157,112,8>>, 4)),
+
+    ok.
+
 
 -endif.
