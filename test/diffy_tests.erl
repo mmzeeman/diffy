@@ -194,9 +194,9 @@ cleanup_efficiency_test() ->
         cleanup_efficiency([{insert, <<"12">>}, {equal, <<"x">>}, {delete, <<"cd">>}, {insert, <<"34">>}])),
 
     % Backpass elimination
-    % ?assertEqual([{delete, <<"abxyzcd">>}, {insert, <<"12wxyz34">>}],
-    %     cleanup_efficiency([{delete, <<"ab">>}, {insert, <<"12">>}, {equal, <<"xy">>}, {insert, <<"34">>}, 
-    %         {equal, <<"z">>}, {delete, <<"cd">>}, {insert, <<"56">>}])),
+    ?assertEqual([{delete, <<"abxyzcd">>}, {insert, <<"12xy34z56">>}],
+        cleanup_efficiency([{delete, <<"ab">>}, {insert, <<"12">>}, {equal, <<"xy">>}, {insert, <<"34">>}, 
+            {equal, <<"z">>}, {delete, <<"cd">>}, {insert, <<"56">>}])),
 
     ok.
 

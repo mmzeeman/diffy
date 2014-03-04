@@ -441,18 +441,18 @@ cleanup_efficiency([{Op1, _}=H, {equal, XY}=E, {Op2, _}=I|T], Changed, EditCost,
 %% Any equality which is surrounded on one side by an existing insertion and deletion and on the 
 %% other side by an exisiting insertion or deletion needs by less than half C characters long for it 
 %% to be advantagous to split.
-% cleanup_efficiency([{O1, _}=A, {O2, _}=B, {equal, X}=E, {O3, _}=C | T], Changed, EditCost, Acc) when
-%     O1 =/= O2 andalso ?IS_INS_OR_DEL(O1) andalso ?IS_INS_OR_DEL(O2) andalso ?IS_INS_OR_DEL(O3) ->
-%     case text_smaller_than(X, EditCost div 2) of
-%         true ->
-%             %% Split
-%             Del = {delete, X},
-%             Ins = {insert, X},
-%             cleanup_efficiency([Ins, C | T], true, EditCost, [Del, B, A | Acc]);
-%         false ->
-%             %% Equal is big enough, move delete and equal out of the way.
-%             cleanup_efficiency([C | T], Changed, EditCost, [E, B, A |Acc])
-%     end;
+cleanup_efficiency([{O1, _}=A, {O2, _}=B, {equal, X}=E, {O3, _}=C | T], Changed, EditCost, Acc) when
+    O1 =/= O2 andalso ?IS_INS_OR_DEL(O1) andalso ?IS_INS_OR_DEL(O2) andalso ?IS_INS_OR_DEL(O3) ->
+    case text_smaller_than(X, EditCost div 2 + 1) of
+        true ->
+            %% Split
+            Del = {delete, X},
+            Ins = {insert, X},
+            cleanup_efficiency([C | T], true, EditCost, [Ins, Del, B, A | Acc]);
+        false ->
+            %% Equal is big enough, move delete and equal out of the way.
+            cleanup_efficiency([B, E, C | T], Changed, EditCost, [A |Acc])
+    end;
 cleanup_efficiency([H|T], Changed, EditCost, Acc) ->
     cleanup_efficiency(T, Changed, EditCost, [H|Acc]).
 
