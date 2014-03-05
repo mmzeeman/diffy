@@ -795,20 +795,9 @@ utf8_prefix_repair(Bin) ->
     Size = size(Bin),
     Size1 = Size-1, Size2 = Size-2, Size3 = Size-3, Size4 = Size-4,
     case Bin of
-        %% Valid 4-byte
-        <<_:Size4/binary, 2#11110:5, _A:3,  2#10:2, _B:6,   2#10:2, _C:6,  2#10:2, _D:6>> ->
-            {Bin, <<>>};
-        %% Valid 3-byte
-        <<_:Size3/binary, 2#1110:4, _A:4,  2#10:2, _B:6,  2#10:2, _C:6>> ->
-            {Bin, <<>>};
-         %% Valid 2-byte
-        <<_:Size2/binary, 2#110:3, _A:5, 2#10:2, _B:6>> ->
-            {Bin, <<>>};
-        %% Valid 1-byte
+        %% Valid 1 -byte
         <<_:Size1/binary, 2#0:1, _A:7>> ->
-            {Bin, <<>>}; 
-        
-        %% half utf-8 chars
+             {Bin, <<>>}; 
         %% Invalid 1-byte
         <<Pre:Size1/binary, 2#110:3, A:5>> ->
             {Pre, <<2#110:3, A:5>>};
@@ -816,17 +805,30 @@ utf8_prefix_repair(Bin) ->
             {Pre, <<2#1110:4, A:4>>};
         <<Pre:Size1/binary, 2#11110:5, A:3>> ->
             {Pre, <<2#11110:5, A:3>>};
-        %% Invalid 2-byte
+
+        %% Valid 2-byte ending
+        <<_:Size2/binary, 2#110:3, _A:5, 2#10:2, _B:6>> ->
+             {Bin, <<>>};
+        %% Invalid 2-byte ending
         <<Pre:Size2/binary, 2#1110:4, A:4, 2#10:2, B:6>> ->
             {Pre, <<2#1110:4, A:4, 2#10:2, B:6>>};
         <<Pre:Size2/binary, 2#11110:5, A:3, 2#10:2, B:6>> ->
             {Pre, <<2#11110:5, A:3, 2#10:2, B:6>>};
-        %% Invalid 3-byte
 
+        %% Valid 3-byte ending
+        <<_:Size3/binary, 2#1110:4, _A:4,  2#10:2, _B:6,  2#10:2, _C:6>> ->
+             {Bin, <<>>};
+        %% Invalid 3-byte ending
+        <<Pre:Size4/binary, 2#11110:5, A:3,  2#10:2, B:6, 2#10:2, C:6>> ->
+            {Pre, <<2#11110:5, A:3, 2#10:2, B:6, 2#10:2, C:6>>};
+
+        %% Valid 4-byte ending
+        <<_:Size4/binary, 2#11110:5, _A:3,  2#10:2, _B:6,   2#10:2, _C:6,  2#10:2, _D:6>> ->
+             {Bin, <<>>};
+
+        %% All other stuff is invalid
         _ ->
-            <<Pre:Size1/binary, Last/binary>> = Bin,
-            io:fwrite(standard_error, "Last ~p~n", [Pre, Last]),
-            throw(todo)
+            error(badarg)
     end.
 
 utf8_suffix_repair(<<>>) ->
