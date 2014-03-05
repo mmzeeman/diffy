@@ -212,6 +212,27 @@ text_size_test() ->
 
     ok.
 
+diff_test() ->
+    %% No input, no diff
+    ?assertEqual([], diff(<<>>, <<>>)),
+
+    %% Texts are equal
+    ?assertEqual([{equal, <<"String">>}], diff(<<"String">>, <<"String">>)),
+
+    %% Insert and delete
+    ?assertEqual([{insert, <<"test">>}], diff(<<>>, <<"test">>)),
+    ?assertEqual([{delete, <<"test">>}], diff(<<"test">>, <<>>)),
+
+    %% Longtext inside short text
+    ?assertEqual([], diff(<<"test">>, <<"a/b-test-ing">>)),
+
+
+    ?assertEqual([{equal, <<"t">>},
+                  {insert, <<"e">>},
+                  {equal, <<"st">>}], diff(<<"tst">>, <<"test">>)),
+    ok.
+
+
 %%
 %% Helpers
 %%

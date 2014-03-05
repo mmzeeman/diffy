@@ -85,6 +85,7 @@ diff(Text1, Text2, _CheckLines) when Text1 =:= Text2 ->
     [{equal, Text1}];
 diff(Text1, Text2, CheckLines) ->
     {Prefix, MText1, MText2, Suffix} = split_pre_and_suffix(Text1, Text2),
+
     Diffs = compute_diff(MText1, MText2, CheckLines),
 
     Diffs1 = case Suffix of
@@ -106,15 +107,22 @@ compute_diff(OldText, <<>>, _CheckLines) ->
     [{delete, OldText}];
 compute_diff(OldText, NewText, CheckLines) ->
     %% Check if ShortText is inside LongText
-    {ShortText, LongText} = case size(OldText) < size(NewText) of
+    OldGtNew = size(OldText) < size(NewText),
+
+    {ShortText, LongText} = case OldGtNew of
         true -> {OldText, NewText};
         false -> {NewText, OldText}
     end,
 
+    %% TODO: check if this works for utf8 input.
     case binary:match(LongText, ShortText) of
-        {_Start, _Length} ->
-            %% Optimization, shorttext is inside longtext
-            throw(not_yet_short_text_inside_longtext); 
+        {Start, Length} ->
+            <<Pre:Start/binary, _:Length/binary, Suf/binary>> = Long,
+            Op = case OldGtNew of
+                true -> delete;
+                false -> insert
+            end,
+            [{Op, Pre}, {equal, Short}, {Op, Suf}]; 
         nomatch ->
             case size(ShortText) of
                 1 ->
@@ -123,6 +131,13 @@ compute_diff(OldText, NewText, CheckLines) ->
                     compute_diff1(OldText, NewText, CheckLines)
              end
     end.
+
+single_char(<<>>) ->
+    false;
+single_char(<<C/utf8>>) ->
+    true;
+single_char(Bin) when is_binary(Bin) ->
+    false.
 
 %% Line diff
 compute_diff1(Text1, Text2, true) ->
@@ -718,19 +733,6 @@ array_test() ->
     ?assertEqual(<<"broodje aap">>, binary_from_array(0, 11, array_from_binary(<<"broodje aap">>))),
     ?assertEqual(<<"aa">>, binary_from_array(0, 2, array_from_binary(<<"aap">>))),
     ?assertEqual(<<"ap">>, binary_from_array(1, 3, array_from_binary(<<"aap">>))),
-    ok.
-
-
-diff_test() ->
-    ?assertEqual([], diff(<<>>, <<>>)),
-    ?assertEqual([{equal, <<"String">>}], diff(<<"String">>, <<"String">>)),
-
-    ?assertEqual([{insert, <<"test">>}], diff(<<>>, <<"test">>)),
-    ?assertEqual([{delete, <<"test">>}], diff(<<"test">>, <<>>)),
-
-    ?assertEqual([{equal, <<"t">>},
-                  {insert, <<"e">>},
-                  {equal, <<"st">>}], diff(<<"tst">>, <<"test">>)),
     ok.
 
 diff_utf8_test() ->
