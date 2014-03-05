@@ -229,6 +229,12 @@ diff_test() ->
     ?assertEqual([{delete, <<"a-">>}, {equal, <<"test">>}, {delete, <<"-b">>}], 
         diffy:diff(<<"a-test-b">>, <<"test">>)),
 
+    %% Single char insertions
+    ?assertEqual([{delete,<<"x">>},{insert,<<"test">>}],
+        diffy:diff(<<"x">>, <<"test">>)),
+    ?assertEqual([{insert,<<"test">>},{delete,<<"x">>}],
+        diffy:diff(<<"test">>, <<"x">>)),
+
     ?assertEqual([{equal, <<"t">>},
                   {insert, <<"e">>},
                   {equal, <<"st">>}], diffy:diff(<<"tst">>, <<"test">>)),

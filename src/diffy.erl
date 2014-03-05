@@ -116,26 +116,101 @@ compute_diff(OldText, NewText, CheckLines) ->
     case binary:match(LongText, ShortText) of
         {Start, Length} ->
             <<Pre:Start/binary, _:Length/binary, Suf/binary>> = LongText,
-            Op = case OldStNew of
-                true -> insert;
-                false -> delete
-            end,
+            Op = diff_op(OldStNew),
             [{Op, Pre}, {equal, ShortText}, {Op, Suf}]; 
         nomatch ->
-            case size(ShortText) of
-                1 ->
-                    [{delete, OldText}, {insert, NewText}];
-                _ ->
+            case single_char(ShortText) of
+                true ->
+                    case OldStNew of
+                        true ->
+                            [{delete, OldText}, {insert, NewText}];
+                        false ->
+                            [{insert, OldText}, {delete, NewText}]
+                    end;
+                false ->
+                    %% Note: Half match skipped for now.
+                    try_half_match(OldText, NewText, CheckLines),
                     compute_diff1(OldText, NewText, CheckLines)
              end
     end.
 
+diff_op(true) -> insert;
+diff_op(false) -> delete.
+
+% @doc Return true iff binary is a single character.
 single_char(<<>>) ->
     false;
-single_char(<<C/utf8>>) ->
+single_char(<<_C/utf8>>) ->
     true;
 single_char(Bin) when is_binary(Bin) ->
     false.
+
+%% 
+try_half_match(OldText, NewText, CheckLines) ->
+    case half_match(OldText, NewText) of
+        {half_match, A1, A2, B1, B2, Common} ->
+            Diffs1 = diff(A1, B1, CheckLines),
+            Diffs2 = diff(A2, B2, CheckLines),
+            Diffs1 ++ [{equal, Common} | Diffs2];
+        undefined ->
+            compute_diff1(OldText, NewText, CheckLines)
+    end.
+
+%%
+half_match(A, B) ->
+    AGtB = size(A) > size(B),
+    {Short, Long} = case AGtB of
+        true -> {B, A};
+        false -> {A, B}
+    end,
+
+    case text_smaller_than(Long, 4) orelse size(Short) * 2 < size(Long) of
+        true ->
+            %% No point in looking.
+            undefined;
+        false ->
+            %% Note: this could split through a utf8 byte sequence.
+            Hm1 = half_match_i(Long, Short, size(Long) + 3 div 4),
+            Hm2 = half_match_i(Long, Short, size(Long) + 1 div 2),
+            Hm = case {Hm1, Hm2} of
+                {undefined, undefined} -> 
+                    undefined;
+                {undefined, _} -> 
+                    Hm2;
+                {_, undefined} -> 
+                    Hm1;
+                {{half_match, _, _, _, _, C1}, {half_match, _, _, _, _, C2}} when size(C1) > size(C2) ->
+                    Hm1;
+                {_, _} ->
+                    Hm2
+            end,
+
+            case Hm of
+                undefined -> 
+                    undefined;
+                {half_match, T1A, T1B, T2A, T2B, MidCommon} ->
+                    case AGtB of
+                        true -> 
+                            Hm;
+                        false ->
+                            {half_match, T2A, T2B, T1A, T1B, MidCommon}
+                    end
+            end
+    end.
+
+
+half_match_i(Long, Short, I) ->
+    SeedSize = size(Long) div 4,
+
+    %% Note, need to split on utf8 character boundary here.
+    <<_Pre:I/binary, Seed:SeedSize/binary, _Post/binary>> = Long,
+
+    % case binary:match(Short, Seed) of
+    %     nomatch ->
+
+    throw(todo).
+
+    
 
 %% Line diff
 compute_diff1(Text1, Text2, true) ->
@@ -712,6 +787,51 @@ binary_from_array(N, End, Array, Acc) when N < End ->
 binary_from_array(_, _, _, Acc) ->
     Acc.
 
+%% @doc Checks the trailing bytes for utf8 prefix bytes.
+utf8_prefix_repair(<<>>) ->
+    {<<>>, <<>>};
+%% Checks 
+utf8_prefix_repair(Bin) ->
+    Size = size(Bin),
+    Size1 = Size-1, Size2 = Size-2, Size3 = Size-3, Size4 = Size-4,
+    case Bin of
+        %% Valid 4-byte
+        <<_:Size4/binary, 2#11110:5, _A:3,  2#10:2, _B:6,   2#10:2, _C:6,  2#10:2, _D:6>> ->
+            {Bin, <<>>};
+        %% Valid 3-byte
+        <<_:Size3/binary, 2#1110:4, _A:4,  2#10:2, _B:6,  2#10:2, _C:6>> ->
+            {Bin, <<>>};
+         %% Valid 2-byte
+        <<_:Size2/binary, 2#110:3, _A:5, 2#10:2, _B:6>> ->
+            {Bin, <<>>};
+        %% Valid 1-byte
+        <<_:Size1/binary, 2#0:1, _A:7>> ->
+            {Bin, <<>>}; 
+        
+        %% half utf-8 chars
+        %% Invalid 1-byte
+        <<Pre:Size1/binary, 2#110:3, A:5>> ->
+            {Pre, <<2#110:3, A:5>>};
+        <<Pre:Size1/binary, 2#1110:4, A:4>> ->
+            {Pre, <<2#1110:4, A:4>>};
+        <<Pre:Size1/binary, 2#11110:5, A:3>> ->
+            {Pre, <<2#11110:5, A:3>>};
+        %% Invalid 2-byte
+        <<Pre:Size2/binary, 2#1110:4, A:4, 2#10:2, B:6>> ->
+            {Pre, <<2#1110:4, A:4, 2#10:2, B:6>>};
+        <<Pre:Size2/binary, 2#11110:5, A:3, 2#10:2, B:6>> ->
+            {Pre, <<2#11110:5, A:3, 2#10:2, B:6>>};
+        %% Invalid 3-byte
+
+        _ ->
+            <<Pre:Size1/binary, Last/binary>> = Bin,
+            io:fwrite(standard_error, "Last ~p~n", [Pre, Last]),
+            throw(todo)
+    end.
+
+utf8_suffix_repair(<<>>) ->
+    {<<>>, <<>>}.
+
 
 %%
 %% Tests
@@ -720,6 +840,18 @@ binary_from_array(_, _, _, Acc) ->
 -ifdef(TEST).
 
 -include_lib("eunit/include/eunit.hrl").
+
+utf8_prefix_repair_test() ->
+    ?assertEqual({<<>>, <<>>}, utf8_prefix_repair(<<>>)),
+    ?assertEqual({<<"aap">>, <<>>}, utf8_prefix_repair(<<"aap">>)),
+    ?assertEqual({<<200/utf8>>, <<>>}, utf8_prefix_repair(<<200/utf8>>)),
+    ?assertEqual({<<600/utf8>>, <<>>}, utf8_prefix_repair(<<600/utf8>>)),
+    ?assertEqual({<<1000/utf8>>, <<>>}, utf8_prefix_repair(<<1000/utf8>>)),
+
+    ?assertEqual({<<"aap">>, <<200>>}, utf8_prefix_repair(<<"aap", 200>>)),
+
+    ok.
+    
 
 for_test() ->
     ?assertEqual(9, for(0, 10, fun(I, _N) -> {continue, I} end, undefined)),
