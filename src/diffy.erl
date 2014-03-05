@@ -788,10 +788,10 @@ binary_from_array(_, _, _, Acc) ->
     Acc.
 
 %% @doc Checks the trailing bytes for utf8 prefix bytes.
-utf8_prefix_repair(<<>>) ->
+repair_tail(<<>>) ->
     {<<>>, <<>>};
 %% Checks 
-utf8_prefix_repair(Bin) ->
+repair_tail(Bin) ->
     Size = size(Bin),
     Size1 = Size-1, Size2 = Size-2, Size3 = Size-3, Size4 = Size-4,
     case Bin of
@@ -831,9 +831,32 @@ utf8_prefix_repair(Bin) ->
             error(badarg)
     end.
 
-utf8_suffix_repair(<<>>) ->
-    {<<>>, <<>>}.
-
+% @doc Checks the beginning of a binary and strips of partial utf-8 encoded bytes.
+repair_head(<<>>) ->
+    {<<>>, <<>>};
+% valid 1-byte beginning
+repair_head(<<2#0:1, _A:7, _Rest/binary>>=Bin) ->
+    {<<>>, Bin};
+% valid 4-byte beginning
+repair_head(<<2#11110:5, _A:3,  2#10:2, _B:6, 2#10:2, _C:6,  2#10:2, _D:6, _Rest/binary>>=Bin) ->
+    {<<>>, Bin};
+% valid 3-byte beginning
+repair_head(<<2#1110:4, _A:4,  2#10:2, _B:6,  2#10:2, _C:6, _Rest/binary>>=Bin) ->
+    {<<>>, Bin};
+% invalid 3-byte beginning
+repair_head(<<2#10:2, A:6, 2#10:2, B:6, 2#10:2, C:6, Rest/binary>>) ->
+    {<<2#10:2, A:6, 2#10:2, B:6, 2#10:2, C:6>>, Rest};
+% valid 2-byte beginning
+repair_head(<<2#110:3, _A:5, 2#10:2, _B:6, _Rest/binary>>=Bin) ->
+    {<<>>, Bin};
+% invalid 2-byte beginnings
+repair_head(<<2#10:2, A:6, 2#10:2, B:6, Rest/binary>>) ->
+    {<<2#10:2, A:6, 2#10:2, B:6>>, Rest};
+% invalid 1-byte beginning
+repair_head(<<2#10:2, A:6, Rest/binary>>) ->
+    {<<2#10:2, A:6>>, Rest};
+repair_head(_) ->
+    error(badarg).
 
 %%
 %% Tests
@@ -843,16 +866,35 @@ utf8_suffix_repair(<<>>) ->
 
 -include_lib("eunit/include/eunit.hrl").
 
-utf8_prefix_repair_test() ->
-    ?assertEqual({<<>>, <<>>}, utf8_prefix_repair(<<>>)),
-    ?assertEqual({<<"aap">>, <<>>}, utf8_prefix_repair(<<"aap">>)),
-    ?assertEqual({<<200/utf8>>, <<>>}, utf8_prefix_repair(<<200/utf8>>)),
-    ?assertEqual({<<600/utf8>>, <<>>}, utf8_prefix_repair(<<600/utf8>>)),
-    ?assertEqual({<<1000/utf8>>, <<>>}, utf8_prefix_repair(<<1000/utf8>>)),
+repair_tail_test() ->
+    ?assertEqual({<<>>, <<>>}, repair_tail(<<>>)),
+    ?assertEqual({<<"aap">>, <<>>}, repair_tail(<<"aap">>)),
+    ?assertEqual({<<200/utf8>>, <<>>}, repair_tail(<<200/utf8>>)),
+    ?assertEqual({<<600/utf8>>, <<>>}, repair_tail(<<600/utf8>>)),
+    ?assertEqual({<<1000/utf8>>, <<>>}, repair_tail(<<1000/utf8>>)),
 
-    ?assertEqual({<<"aap">>, <<200>>}, utf8_prefix_repair(<<"aap", 200>>)),
+    ?assertEqual({<<"aap">>, <<200>>}, repair_tail(<<"aap", 200>>)),
 
     ok.
+
+repair_head_test() -> 
+    ?assertEqual({<<>>, <<>>}, repair_head(<<>>)),
+    ?assertEqual({<<>>, <<"a">>}, repair_head(<<"a">>)),
+    ?assertEqual({<<>>, <<"aap">>}, repair_head(<<"aap">>)),
+    ?assertEqual({<<>>, <<200/utf8>>}, repair_head(<<200/utf8>>)),
+    ?assertEqual({<<>>, <<600/utf8>>}, repair_head(<<600/utf8>>)),
+    ?assertEqual({<<>>, <<1000/utf8>>}, repair_head(<<1000/utf8>>)),
+
+    %%
+    ?assertEqual({<<2#10:2, 10:6>>, <<"aap">>}, 
+        repair_head(<<2#10:2, 10:6, "aap">>)),
+    ?assertEqual({<<2#10:2, 60:6, 2#10:2, 10:6>>, <<"aap">>}, 
+        repair_head(<<2#10:2, 60:6, 2#10:2, 10:6, "aap">>)),
+    ?assertEqual({<<2#10:2, 60:6, 2#10:2, 10:6, 2#10:2, 13:6>>, <<"aap">>}, 
+        repair_head(<<2#10:2, 60:6, 2#10:2, 10:6, 2#10:2, 13:6, "aap">>)),
+
+    ok.
+
     
 
 for_test() ->
