@@ -672,7 +672,9 @@ text_size(Text) when is_binary(Text) ->
 text_size(<<>>, Count) ->
     Count;
 text_size(<<_C/utf8, Rest/binary>>, Count) ->
-    text_size(Rest, Count+1).
+    text_size(Rest, Count+1);
+text_size(_, _) ->
+    error(badarg).
 
 %%
 %% Array utilities
