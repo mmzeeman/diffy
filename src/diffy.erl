@@ -106,19 +106,17 @@ compute_diff(<<>>, NewText, _CheckLines) ->
 compute_diff(OldText, <<>>, _CheckLines) ->
     [{delete, OldText}];
 compute_diff(OldText, NewText, CheckLines) ->
-    %% Check if ShortText is inside LongText
-    OldGtNew = size(OldText) < size(NewText),
+    OldStNew = size(OldText) < size(NewText),
 
-    {ShortText, LongText} = case OldGtNew of
+    {ShortText, LongText} = case OldStNew of
         true -> {OldText, NewText};
         false -> {NewText, OldText}
     end,
 
-    %% TODO: check if this works for utf8 input.
     case binary:match(LongText, ShortText) of
         {Start, Length} ->
             <<Pre:Start/binary, _:Length/binary, Suf/binary>> = LongText,
-            Op = case OldGtNew of
+            Op = case OldStNew of
                 true -> insert;
                 false -> delete
             end,
