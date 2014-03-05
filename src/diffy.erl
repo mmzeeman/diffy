@@ -205,12 +205,18 @@ half_match_i(Long, Short, I) ->
     %% Note, need to split on utf8 character boundary here.
     <<_Pre:I/binary, Seed:SeedSize/binary, _Post/binary>> = Long,
 
-    % case binary:match(Short, Seed) of
-    %     nomatch ->
+    %% Utf-8 repair the seed's head and tail. 
+    {_, Seed1} = repair_head(Seed),
+    {Seed2, _} = repair_tail(Seed1),
 
-    throw(todo).
+    %% Check if we can find a match for Seed2 inside the shorttext.
+    case binary:match(Short, Seed2) of
+        nomatch ->
+	    undefined;
+        {Start, Length} ->
+            throw(todo)
+    end.
 
-    
 
 %% Line diff
 compute_diff1(Text1, Text2, true) ->
@@ -389,11 +395,11 @@ pretty_html([{Op, Data}|T], Acc) ->
     Text = z_html:escape(Data),
     HTML = case Op of
         insert ->
-            <<"<ins style='background:#e6ffe6;'>", Text/binary, "</ins>">>;
+            [<<"<ins style='background:#e6ffe6;'>">>, Text, <<"</ins>">>];
         delete ->
-            <<"<del style='background:#ffe6e6;'>", Text/binary, "</del>">>;
+            [<<"<del style='background:#ffe6e6;'>">>, Text, <<"</del>">>];
         equal ->
-            <<"<span>>", Text/binary, "</span>">>
+            [<<"<span>>">>, Text, <<"</span>">>]
     end,
     pretty_html(T, [HTML|Acc]).
 
@@ -660,7 +666,7 @@ match_padding(Pattern, Text, Start, BinLength, Utf8Length) ->
             throw(not_yet)
     end.    
     
-%%
+% @doc Returns true iff Pattern is a unique match inside Text.
 unique_match(Pattern, Text) ->
     TextSize = size(Text),
     case binary:match(Text, Pattern) of
@@ -682,14 +688,10 @@ unique_match(Pattern, Text) ->
 %%
 
 % @doc Return true iff A is a prefix of B
-is_prefix(<<>>, B) ->
-    true;
 is_prefix(A, B) when size(A) > size(B) ->
     false;
-is_prefix(<<C1/utf8, ARest/binary>>, <<C2/utf8, BRest/binary>>) when C1 =:= C2 ->
-    is_prefix(ARest, BRest);
-is_prefix(_, _) ->
-    false.
+is_prefix(A, B) ->
+    size(A) =:= binary:longest_common_prefix([A,B]).
 
 % @doc Return true iff A is a suffix of B
 is_suffix(A, B) when size(A) > size(B) ->
@@ -700,16 +702,20 @@ is_suffix(A, B) ->
 
 match_front(X1, Y1, A, M, B, N) when X1 < M andalso Y1 < N ->
     case array:get(X1, A) =:= array:get(Y1, B) of
-        true -> match_front(X1+1, Y1+1, A, M, B, N);
-        false -> {X1, Y1}
+        true -> 
+	    match_front(X1+1, Y1+1, A, M, B, N);
+        false -> 
+	    {X1, Y1}
     end;
 match_front(X1, Y1, _, _, _, _) ->
     {X1, Y1}.
 
 match_reverse(X1, Y1, A, M, B, N) when X1 < M andalso Y1 < N ->
     case array:get(M-X1-1, A) =:= array:get(N-Y1-1, B) of
-        true -> match_reverse(X1+1, Y1+1, A, M, B, N);
-        false -> {X1, Y1}
+        true -> 
+	    match_reverse(X1+1, Y1+1, A, M, B, N);
+        false -> 
+	    {X1, Y1}
     end;
 match_reverse(X1, Y1, _, _, _, _) ->
     {X1, Y1}.
@@ -739,18 +745,21 @@ split_pre_and_suffix(Text1, Text2) ->
     
 % @doc Return the common prefix of Text1 and Text2. (utf8 aware)
 common_prefix(Text1, Text2) ->
-    common_prefix(Text1, Text2, <<>>).
-
-common_prefix(<<C/utf8, Rest1/binary>>, <<C/utf8, Rest2/binary>>, Acc) ->
-    common_prefix(Rest1, Rest2, <<Acc/binary, C/utf8>>);
-common_prefix(_, _, Acc) ->
-    Acc.
+    Length = binary:longest_common_prefix([Text1, Text2]),
+    Prefix = binary:part(Text1, 0, Length),
+    
+    %% Utf-8 repair the tail of the prefix. It could contain a half utf-9 char.
+    {Prefix1, _} = repair_tail(Prefix),
+    Prefix1.
 
 % @doc Return the common prefix of Text1 and Text2 (utf8 aware)
 common_suffix(Text1, Text2) ->
-    %% Note that the builtin common suffix is correct for utf8 input.
     Length = binary:longest_common_suffix([Text1, Text2]),
-    binary:part(Text1, size(Text1), -Length).
+    Suffix = binary:part(Text1, size(Text1), -Length),
+
+    %% Utf-8 repair the head of the suffix. Could contain a half utf8 char
+    {_, Suffix1} = repair_head(Suffix),
+    Suffix1.
 
 
 % @doc Count the number of characters in a utf8 binary.
@@ -826,9 +835,10 @@ repair_tail(Bin) ->
         <<_:Size4/binary, 2#11110:5, _A:3,  2#10:2, _B:6,   2#10:2, _C:6,  2#10:2, _D:6>> ->
              {Bin, <<>>};
 
-        %% All other stuff is invalid
+        %% Illegal utf-8 sequence.
         _ ->
-            error(badarg)
+	    %% Can't repair it, just return
+	    {Bin, <<>>}
     end.
 
 % @doc Checks the beginning of a binary and strips of partial utf-8 encoded bytes.
@@ -855,8 +865,9 @@ repair_head(<<2#10:2, A:6, 2#10:2, B:6, Rest/binary>>) ->
 % invalid 1-byte beginning
 repair_head(<<2#10:2, A:6, Rest/binary>>) ->
     {<<2#10:2, A:6>>, Rest};
-repair_head(_) ->
-    error(badarg).
+repair_head(Bin) ->
+    %% Illegal sequence, can't repair it.
+    {<<>>, Bin}.
 
 %%
 %% Tests

@@ -56,12 +56,12 @@ prop_cleanup_efficiency() ->
 %%
 
 pretty_html_test() ->
-    ?assertEqual([], diffy:pretty_html([])),
-    ?assertEqual([<<"<span>>test</span>">>], diffy:pretty_html([{equal, <<"test">>}])),
-    ?assertEqual([<<"<del style='background:#ffe6e6;'>foo</del>">>, 
-        <<"<span>>test</span>">>], diffy:pretty_html([{delete, <<"foo">>}, {equal, <<"test">>}])),
-    ?assertEqual([<<"<ins style='background:#e6ffe6;'>foo</ins>">>, 
-        <<"<span>>test</span>">>], diffy:pretty_html([{insert, <<"foo">>}, {equal, <<"test">>}])),
+    ?assertEqual(<<>>, pretty_html([])),
+    ?assertEqual(<<"<span>>test</span>">>, pretty_html([{equal, <<"test">>}])),
+    ?assertEqual(<<"<del style='background:#ffe6e6;'>foo</del><span>>test</span>">>, 
+        pretty_html([{delete, <<"foo">>}, {equal, <<"test">>}])),
+    ?assertEqual(<<"<ins style='background:#e6ffe6;'>foo</ins><span>>test</span>">>, 
+        pretty_html([{insert, <<"foo">>}, {equal, <<"test">>}])),
     ok.
 
 source_text_test() ->
@@ -244,6 +244,9 @@ diff_test() ->
 %%
 %% Helpers
 %%
+
+pretty_html(Diffs) ->
+    iolist_to_binary(diffy:pretty_html(Diffs)).
 
 cleanup_efficiency(Diffs) ->
     diffy:cleanup_efficiency(Diffs).
