@@ -200,6 +200,13 @@ cleanup_efficiency_test() ->
 
     ok.
 
+text_size_test() ->
+    ?assertEqual(0, diffy:text_size(<<>>)),
+    ?assertEqual(3, diffy:text_size(<<"aap">>)),
+    ?assertEqual(3, diffy:text_size(<<"aap">>)),
+    ?assertEqual(4, diffy:text_size(<<229/utf8, 228/utf8, 246/utf8, 251/utf8>>)),
+    ?assertEqual(4, diffy:text_size(<<1046/utf8, 1011/utf8, 1022/utf8, 127/utf8>>)),
+    ok.
 
 %%
 %% Helpers

@@ -38,7 +38,9 @@
     levenshtein/1,
 
     make_patch/1,
-    make_patch/2
+    make_patch/2,
+
+    text_size/1
 ]).
 
 -type diff_op() :: delete | equal | insert.
@@ -83,20 +85,19 @@ diff(Text1, Text2, _CheckLines) when Text1 =:= Text2 ->
     [{equal, Text1}];
 diff(Text1, Text2, CheckLines) ->
     {Prefix, MText1, MText2, Suffix} = split_pre_and_suffix(Text1, Text2),
-    Diffs = compute_diff(MText1, MText2, CheckLines), 
+    Diffs = compute_diff(MText1, MText2, CheckLines),
 
-    Diffs1 = case {Prefix, Suffix} of
-        {<<>>, <<>>} ->
-            Diffs;
-        {<<>>, _} ->
-            Diffs ++ [{equal, Suffix}];
-        {_, <<>>} -> 
-            [{equal, Prefix} | Diffs];
-        {_, _} ->
-            [{equal, Prefix} | Diffs] ++ [{equal, Suffix}] 
+    Diffs1 = case Suffix of
+        <<>> -> Diffs;
+        _ -> Diffs ++ [{equal, Suffix}]
     end,
 
-    cleanup_merge(Diffs1).
+    Diffs2 = case Prefix of 
+        <<>> -> Diffs1;
+        _ -> [{equal, Prefix} | Diffs1]
+    end,
+
+    cleanup_merge(Diffs2).
 
 %% This assumes Text1 and Text2 don't have a common prefix
 compute_diff(<<>>, NewText, _CheckLines) ->
@@ -409,13 +410,6 @@ cleanup_efficiency(Diffs) ->
 cleanup_efficiency(Diffs, EditCost) ->
     cleanup_efficiency(Diffs, false, EditCost, []).
 
-% Five types to be split:
-% {insert, A}, {delete, B}, {equal, XY}, {insert, C}, {delete, D}
-% {insert, A}, {equal, X}, {insert, C}, {delete, D}
-% {insert, A}, {delete, B}, {equal, X}, {insert, C}
-% {insert, A}, {delete, B}, {equal, X}, {insert, C}, {delete, D}
-% {insert, A}, {delete, B}, {equal, X}, {delete, C}
-
 %% Done.
 cleanup_efficiency([], Changed, _EditCost, Acc) ->
     Diffs = lists:reverse(Acc),
@@ -425,18 +419,18 @@ cleanup_efficiency([], Changed, _EditCost, Acc) ->
     end;
 %% Any equality which is surrounded on both sides by an insertion and deletion need less then 
 %% EditCost characters for it to be advantageous to split.
-cleanup_efficiency([{Op1, _}=H, {equal, XY}=E, {Op2, _}=I|T], Changed, EditCost, Acc) when 
-        Op1 =/= Op2 andalso ?IS_INS_OR_DEL(Op1) andalso ?IS_INS_OR_DEL(Op2) ->
+cleanup_efficiency([{O1, _}=A, {equal, XY}=E, {O2, _}=B | T], Changed, EditCost, Acc) when 
+        O1 =/= O2 andalso ?IS_INS_OR_DEL(O1) andalso ?IS_INS_OR_DEL(O2) ->
     case text_smaller_than(XY, EditCost) of
         true ->
             %% Split
-            Delete = {delete, XY},
-            Insert = {insert, XY},
+            Del = {delete, XY},
+            Ins = {insert, XY},
 
-            cleanup_efficiency([Insert, I | T], true, EditCost, [Delete, H | Acc]);
+            cleanup_efficiency([Ins, B | T], true, EditCost, [Del, A | Acc]);
         false ->
-            %% Equal is big enough, move delete and equal out of the way.
-            cleanup_efficiency([I | T], Changed, EditCost, [E, H |Acc])
+            %% Equal is big enough, move A and equal out of the way.
+            cleanup_efficiency([B | T], Changed, EditCost, [E, A |Acc])
     end;
 %% Any equality which is surrounded on one side by an existing insertion and deletion and on the 
 %% other side by an exisiting insertion or deletion needs by less than half C characters long for it 
@@ -448,7 +442,7 @@ cleanup_efficiency([{O1, _}=A, {O2, _}=B, {equal, X}=E, {O3, _}=C | T], Changed,
             %% Split
             Del = {delete, X},
             Ins = {insert, X},
-            cleanup_efficiency([C | T], true, EditCost, [Ins, Del, B, A | Acc]);
+            cleanup_efficiency([Ins, C | T], true, EditCost, [Del, B, A | Acc]);
         false ->
             %% Equal is big enough, move delete and equal out of the way.
             cleanup_efficiency([B, E, C | T], Changed, EditCost, [A |Acc])
@@ -724,13 +718,6 @@ array_test() ->
     ?assertEqual(<<"ap">>, binary_from_array(1, 3, array_from_binary(<<"aap">>))),
     ok.
 
-text_size_test() ->
-    ?assertEqual(0, text_size(<<>>)),
-    ?assertEqual(3, text_size(<<"aap">>)),
-    ?assertEqual(3, text_size(<<"aap">>)),
-    ?assertEqual(4, text_size(<<229/utf8, 228/utf8, 246/utf8, 251/utf8>>)),
-    ?assertEqual(4, text_size(<<1046/utf8, 1011/utf8, 1022/utf8, 127/utf8>>)),
-    ok.
 
 diff_test() ->
     ?assertEqual([], diff(<<>>, <<>>)),
@@ -742,7 +729,6 @@ diff_test() ->
     ?assertEqual([{equal, <<"t">>},
                   {insert, <<"e">>},
                   {equal, <<"st">>}], diff(<<"tst">>, <<"test">>)),
-
     ok.
 
 diff_utf8_test() ->
@@ -814,7 +800,7 @@ text_smaller_than_test() ->
 
     %% Test if we count characters.
     Utf8Binary = <<1046/utf8, 1011/utf8, 1022/utf8, 127/utf8>>,
-    ?assertEqual(true, size(Utf8Binary) > 5),
+    ?assertEqual(true, size(Utf8Binary) > 5), % binary is larger due to utf8 encoding
     ?assertEqual(true, text_smaller_than(Utf8Binary, 5)),
     ?assertEqual(false, text_smaller_than(Utf8Binary, 4)),
 
