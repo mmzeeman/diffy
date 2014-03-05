@@ -214,22 +214,24 @@ text_size_test() ->
 
 diff_test() ->
     %% No input, no diff
-    ?assertEqual([], diff(<<>>, <<>>)),
+    ?assertEqual([], diffy:diff(<<>>, <<>>)),
 
     %% Texts are equal
-    ?assertEqual([{equal, <<"String">>}], diff(<<"String">>, <<"String">>)),
+    ?assertEqual([{equal, <<"String">>}], diffy:diff(<<"String">>, <<"String">>)),
 
     %% Insert and delete
-    ?assertEqual([{insert, <<"test">>}], diff(<<>>, <<"test">>)),
-    ?assertEqual([{delete, <<"test">>}], diff(<<"test">>, <<>>)),
+    ?assertEqual([{insert, <<"test">>}], diffy:diff(<<>>, <<"test">>)),
+    ?assertEqual([{delete, <<"test">>}], diffy:diff(<<"test">>, <<>>)),
 
     %% Longtext inside short text
-    ?assertEqual([], diff(<<"test">>, <<"a/b-test-ing">>)),
-
+    ?assertEqual([{insert, <<"a-">>}, {equal, <<"test">>}, {insert, <<"-b">>}], 
+        diffy:diff(<<"test">>, <<"a-test-b">>)),
+    ?assertEqual([{delete, <<"a-">>}, {equal, <<"test">>}, {delete, <<"-b">>}], 
+        diffy:diff(<<"a-test-b">>, <<"test">>)),
 
     ?assertEqual([{equal, <<"t">>},
                   {insert, <<"e">>},
-                  {equal, <<"st">>}], diff(<<"tst">>, <<"test">>)),
+                  {equal, <<"st">>}], diffy:diff(<<"tst">>, <<"test">>)),
     ok.
 
 

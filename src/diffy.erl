@@ -117,12 +117,12 @@ compute_diff(OldText, NewText, CheckLines) ->
     %% TODO: check if this works for utf8 input.
     case binary:match(LongText, ShortText) of
         {Start, Length} ->
-            <<Pre:Start/binary, _:Length/binary, Suf/binary>> = Long,
+            <<Pre:Start/binary, _:Length/binary, Suf/binary>> = LongText,
             Op = case OldGtNew of
-                true -> delete;
-                false -> insert
+                true -> insert;
+                false -> delete
             end,
-            [{Op, Pre}, {equal, Short}, {Op, Suf}]; 
+            [{Op, Pre}, {equal, ShortText}, {Op, Suf}]; 
         nomatch ->
             case size(ShortText) of
                 1 ->
