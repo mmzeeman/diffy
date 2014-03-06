@@ -128,22 +128,12 @@ compute_diff(OldText, NewText, CheckLines) ->
                             [{insert, OldText}, {delete, NewText}]
                     end;
                 false ->
-                    %% Note: Half match skipped for now.
-                    try_half_match(OldText, NewText, CheckLines),
-                    compute_diff1(OldText, NewText, CheckLines)
+                    try_half_match(OldText, NewText, CheckLines)
              end
     end.
 
 diff_op(true) -> insert;
 diff_op(false) -> delete.
-
-% @doc Return true iff binary is a single character.
-single_char(<<>>) ->
-    false;
-single_char(<<_C/utf8>>) ->
-    true;
-single_char(Bin) when is_binary(Bin) ->
-    false.
 
 %% 
 try_half_match(OldText, NewText, CheckLines) ->
@@ -170,8 +160,10 @@ half_match(A, B) ->
             undefined;
         false ->
             %% Note: this could split through a utf8 byte sequence.
-            Hm1 = half_match_i(Long, Short, size(Long) + 3 div 4),
-            Hm2 = half_match_i(Long, Short, size(Long) + 1 div 2),
+            Hm1 = half_match_i(Long, Short, (size(Long) + 3) div 4),
+            Hm2 = half_match_i(Long, Short, (size(Long) + 1) div 2),
+
+            %% Select the longest half-match.
             Hm = case {Hm1, Hm2} of
                 {undefined, undefined} -> 
                     undefined;
@@ -185,13 +177,12 @@ half_match(A, B) ->
                     Hm2
             end,
 
+            %% Swap values if A was smaller than B
             case Hm of
-                undefined -> 
-                    undefined;
+                undefined -> undefined;
                 {half_match, T1A, T1B, T2A, T2B, MidCommon} ->
                     case AGtB of
-                        true -> 
-                            Hm;
+                        true -> Hm;
                         false ->
                             {half_match, T2A, T2B, T1A, T1B, MidCommon}
                     end
@@ -200,22 +191,80 @@ half_match(A, B) ->
 
 
 half_match_i(Long, Short, I) ->
+    {NewI, Seed} = seed(Long, I),
+    case Seed of
+        <<>> -> 
+            undefined;
+        _ ->
+            best_common(Long, Short, Seed, NewI, 0, 
+                undefined, undefined, undefined, undefined, <<>>) 
+    end.
+
+
+best_common(Long, Short, Seed, SeedLoc, Start, 
+        BestLongA, BestLongB, BestShortA, BestShortB, BestCommon) ->
+    %% Check if we can find a match for Seed2 inside the shorttext.
+    case binary:match(Short, Seed, [{scope, {Start, size(Short)-Start}}]) of
+        nomatch -> 
+            case size(BestCommon) * 2 >= size(Long) of
+                false -> 
+                    undefined;
+                true -> 
+                    {half_match, BestLongA, BestLongB, BestShortA, BestShortB, BestCommon}
+            end;
+        {MatchStart, Length} ->
+            %% Because the seed is already at utf-8 boundaries this will work.
+            <<LongPre:SeedLoc/binary, LongPost/binary>> = Long,
+            <<ShortPre:MatchStart/binary, ShortPost/binary>> = Short,
+
+            %% Note: This is a split on a utf8-char boundary.
+            Suffix = common_suffix(LongPre, ShortPre),
+            Prefix = common_prefix(LongPost, ShortPost),
+
+            case size(BestCommon) < size(Prefix) + size(Suffix) of
+                true ->
+                    %% We have a new best common match
+                    NewBestCommon = <<Suffix/binary, Prefix/binary>>,
+
+                    NewBestLongA = slice(Long, 0, SeedLoc - size(Suffix)),
+                    NewBestLongB = slice(Long, SeedLoc + size(Prefix), size(Long)),
+
+                    NewBestShortA = slice(Short, 0, MatchStart - size(Suffix)),
+                    NewBestShortB = slice(Short, MatchStart + size(Prefix), size(Short)),
+
+                    best_common(Long, Short, Seed, SeedLoc, next_char(Short, MatchStart), 
+                        NewBestLongA, NewBestLongB, NewBestShortA, NewBestShortB, NewBestCommon);
+                false ->
+                    best_common(Long, Short, Seed, SeedLoc, next_char(Short, MatchStart), 
+                        BestLongA, BestLongB, BestShortA, BestShortB, BestCommon)
+            end
+    end.
+
+%% @doc Slice a binary.
+slice(Bin, Start, End) when Start >= 0 andalso End >= 0 ->
+    binary:part(Bin, Start, End - Start).
+
+%% @doc Return the position of the next character.
+next_char(Bin, Pos) ->
+    <<_:Pos/binary, C/utf8, _Rest/binary>> = Bin,
+    %% The next char is at binary position...
+    Pos + size(<<C/utf8>>). 
+
+%% 
+seed(Long, Start) ->
     SeedSize = size(Long) div 4,
 
+
     %% Note, need to split on utf8 character boundary here.
-    <<_Pre:I/binary, Seed:SeedSize/binary, _Post/binary>> = Long,
+    <<_Pre:Start/binary, Seed:SeedSize/binary, _Post/binary>> = Long,
 
     %% Utf-8 repair the seed's head and tail. 
-    {_, Seed1} = repair_head(Seed),
+    {Pre, Seed1} = repair_head(Seed),
     {Seed2, _} = repair_tail(Seed1),
 
-    %% Check if we can find a match for Seed2 inside the shorttext.
-    case binary:match(Short, Seed2) of
-        nomatch ->
-	    undefined;
-        {Start, Length} ->
-            throw(todo)
-    end.
+    %% return the start position of the seed and the seed itself.
+    {Start - size(Pre), Seed2}.
+
 
 
 %% Line diff
@@ -687,6 +736,11 @@ unique_match(Pattern, Text) ->
 %% Helpers
 %%
 
+% @doc Return true iff binary is a single character.
+single_char(<<>>) -> false;
+single_char(<<_C/utf8>>) -> true;
+single_char(Bin) when is_binary(Bin) -> false.
+
 % @doc Return true iff A is a prefix of B
 is_prefix(A, B) when size(A) > size(B) ->
     false;
@@ -699,7 +753,7 @@ is_suffix(A, B) when size(A) > size(B) ->
 is_suffix(A, B) ->
     size(A) =:= binary:longest_common_suffix([A, B]).
 
-
+%
 match_front(X1, Y1, A, M, B, N) when X1 < M andalso Y1 < N ->
     case array:get(X1, A) =:= array:get(Y1, B) of
         true -> 
@@ -710,6 +764,7 @@ match_front(X1, Y1, A, M, B, N) when X1 < M andalso Y1 < N ->
 match_front(X1, Y1, _, _, _, _) ->
     {X1, Y1}.
 
+%
 match_reverse(X1, Y1, A, M, B, N) when X1 < M andalso Y1 < N ->
     case array:get(M-X1-1, A) =:= array:get(N-Y1-1, B) of
         true -> 
@@ -947,6 +1002,38 @@ diff_bisect_test() ->
         <<"fruit flies eat a banana">>)),
     ok.
 
+half_match_test() ->
+    ?assertEqual(undefined, half_match(<<"1234567890">>, <<"abcdef">>)),
+    ?assertEqual(undefined, half_match(<<"12345">>, <<"23">>)),
+
+    %% Single Match
+    ?assertEqual({half_match, <<"12">>, <<"90">>, <<"a">>, <<"z">>, <<"345678">>}, 
+        half_match(<<"1234567890">>, <<"a345678z">>)),
+    ?assertEqual({half_match, <<"a">>, <<"z">>, <<"12">>, <<"90">>, <<"345678">>}, 
+        half_match(<<"a345678z">>, <<"1234567890">>)),
+    ?assertEqual({half_match, <<"abc">>, <<"z">>, <<"1234">>, <<"0">>, <<"56789">>}, 
+        half_match(<<"abc56789z">>, <<"1234567890">>)),
+    ?assertEqual({half_match, <<"a">>, <<"xyz">>, <<"1">>, <<"7890">>, <<"23456">>}, 
+        half_match(<<"a23456xyz">>, <<"1234567890">>)),
+
+    %% Multiple Matches
+    ?assertEqual({half_match, <<"12123">>, <<"123121">>, <<"a">>, <<"z">>, <<"1234123451234">>}, 
+        half_match(<<"121231234123451234123121">>, <<"a1234123451234z">>)),
+
+    ?assertEqual({half_match, <<"">>, <<"-=-=-=-=-=">>, <<"x">>, <<"">>, <<"x-=-=-=-=-=-=-=">>}, 
+        half_match(<<"x-=-=-=-=-=-=-=-=-=-=-=-=">>, <<"xx-=-=-=-=-=-=-=">>)),
+
+    ?assertEqual({half_match, <<"-=-=-=-=-=">>, <<"">>, <<"">>, <<"y">>, <<"-=-=-=-=-=-=-=y">>}, 
+        half_match(<<"-=-=-=-=-=-=-=-=-=-=-=-=y">>, <<"-=-=-=-=-=-=-=yy">>)),
+
+    % Non-optimal halfmatch.
+    % Optimal diff would be -q+x=H-i+e=lloHe+Hu=llo-Hew+y not -qHillo+x=HelloHe-w+Hulloy
+    ?assertEqual({half_match, <<"qHillo">>, <<"w">>, <<"x">>, <<"Hulloy">>, <<"HelloHe">>}, 
+        half_match(<<"qHilloHelloHew">>, <<"xHelloHeHulloy">>)),
+
+    ok.
+
+
 common_prefix_test() ->
     ?assertEqual(<<>>, common_prefix(<<"Text">>, <<"Next">>)),
     ?assertEqual(<<"T">>, common_prefix(<<"Text">>, <<"Tax">>)),
@@ -996,6 +1083,17 @@ text_smaller_than_test() ->
     %% Test illegal utf8 sequence, the chars are counted as normal chars
     ?assertEqual(false, text_smaller_than(<<149,157,112,8>>, 4)),
 
+    ok.
+
+slice_test() ->
+    ?assertEqual(<<>>, slice(<<>>, 0, 0)),
+    ?assertEqual(<<"aap">>, slice(<<"aap">>, 0, 3)),
+    ?assertEqual(<<"ap">>, slice(<<"aap">>, 1, 3)),
+    ?assertEqual(<<"p">>, slice(<<"aap">>, 2, 3)),
+    ?assertEqual(<<"">>, slice(<<"aap">>, 3, 3)),
+    ?assertEqual(<<"aa">>, slice(<<"aap">>, 0, 2)),
+    ?assertEqual(<<"a">>, slice(<<"aap">>, 0, 1)),
+    ?assertEqual(<<"a">>, slice(<<"aap">>, 1, 2)),
     ok.
 
 
