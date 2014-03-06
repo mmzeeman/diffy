@@ -221,16 +221,21 @@ best_common(Long, Short, Seed, SeedLoc, Start,
             Suffix = common_suffix(LongPre, ShortPre),
             Prefix = common_prefix(LongPost, ShortPost),
 
-            case size(BestCommon) < size(Prefix) + size(Suffix) of
+	    PrefixSize = size(Prefix),
+	    SuffixSize = size(Suffix),
+
+            case size(BestCommon) < PrefixSize + SuffixSize of
                 true ->
                     %% We have a new best common match
                     NewBestCommon = <<Suffix/binary, Prefix/binary>>,
 
-                    NewBestLongA = slice(Long, 0, SeedLoc - size(Suffix)),
-                    NewBestLongB = slice(Long, SeedLoc + size(Prefix), size(Long)),
+		    A = SeedLoc - SuffixSize,
+		    <<NewBestLongA:A/binary, _/binary>> = LongPre,
+		    <<_:PrefixSize/binary, NewBestLongB/binary>> = LongPost,
 
-                    NewBestShortA = slice(Short, 0, MatchStart - size(Suffix)),
-                    NewBestShortB = slice(Short, MatchStart + size(Prefix), size(Short)),
+		    B = MatchStart - SuffixSize,
+		    <<NewBestShortA:B/binary, _/binary>> = ShortPre,
+		    <<_:PrefixSize/binary, NewBestShortB/binary>> = ShortPost,
 
                     best_common(Long, Short, Seed, SeedLoc, next_char(Short, MatchStart), 
                         NewBestLongA, NewBestLongB, NewBestShortA, NewBestShortB, NewBestCommon);
@@ -239,10 +244,6 @@ best_common(Long, Short, Seed, SeedLoc, Start,
                         BestLongA, BestLongB, BestShortA, BestShortB, BestCommon)
             end
     end.
-
-%% @doc Slice a binary.
-slice(Bin, Start, End) when Start >= 0 andalso End >= 0 ->
-    binary:part(Bin, Start, End - Start).
 
 %% @doc Return the position of the next character.
 next_char(Bin, Pos) ->
@@ -1084,17 +1085,5 @@ text_smaller_than_test() ->
     ?assertEqual(false, text_smaller_than(<<149,157,112,8>>, 4)),
 
     ok.
-
-slice_test() ->
-    ?assertEqual(<<>>, slice(<<>>, 0, 0)),
-    ?assertEqual(<<"aap">>, slice(<<"aap">>, 0, 3)),
-    ?assertEqual(<<"ap">>, slice(<<"aap">>, 1, 3)),
-    ?assertEqual(<<"p">>, slice(<<"aap">>, 2, 3)),
-    ?assertEqual(<<"">>, slice(<<"aap">>, 3, 3)),
-    ?assertEqual(<<"aa">>, slice(<<"aap">>, 0, 2)),
-    ?assertEqual(<<"a">>, slice(<<"aap">>, 0, 1)),
-    ?assertEqual(<<"a">>, slice(<<"aap">>, 1, 2)),
-    ok.
-
 
 -endif.
