@@ -277,10 +277,52 @@ compute_diff1(Text1, Text2, false) ->
     diff_bisect(Text1, Text2).
 
 %%
-compute_diff_linemode(_Text1, _Text2) ->
+compute_diff_linemode(Text1, Text2) ->
+    {CharText1, CharText2, Lines} = lines_to_chars(Text1, Text2),
+    Diffs = diff(CharText1, CharText2, false),
+
+    %% Transform the diffs back to lines.
+
     throw(not_yet).
 
-%% Find the 'middle snake' of a diff, split the problem in two
+
+%% Diff lines
+lines_to_chars(Text1, Text2) ->
+    {CharText1, NextChar, Lines1, Dict1} = lines_to_chars(Text1, 0, <<>>, 1, [], dict:new()),
+    {CharText2, _, Lines2, _Dict2} = lines_to_chars(Text2, 0, <<>>, NextChar, Lines1, Dict1),
+
+    {CharText1, CharText2, lists:reverse(Lines2)}.
+
+
+lines_to_chars(Text, Idx, CharText, NextChar, Lines, D) when Idx >= size(Text) ->
+    {CharText, NextChar, Lines, D};
+lines_to_chars(Text, Idx, CharText, NextChar, Lines, D) ->
+    case binary:match(Text, <<"\n">>, [{scope, {Idx, size(Text)-Idx}}]) of
+        nomatch ->
+            <<_:Idx/binary, Line/binary>> = Text,
+            {Char, NextChar1, Lines1, D1} = insert_line(Line, Lines, D, NextChar),
+            CharText1 = <<CharText/binary, Char/utf8>>,
+            {CharText1, NextChar1, Lines1, D1};
+        {Start, _} ->
+            LineLength = Start - Idx + 1,
+            <<_:Idx/binary, Line:LineLength/binary, _/binary>> = Text,
+
+            {Char, NextChar1, Lines1, D1} = insert_line(Line, Lines, D, NextChar),
+            CharText1 = <<CharText/binary, Char/utf8>>,
+
+            lines_to_chars(Text, Idx + LineLength, CharText1, NextChar1, Lines1, D1) 
+    end.
+
+insert_line(Line, Lines, Dict, NextChar) ->
+    case dict:find(Line, Dict) of
+        {ok, Char} ->
+            {Char, NextChar, Lines, Dict};
+        error ->
+            {NextChar, NextChar+1, [Line|Lines], dict:store(Line, NextChar, Dict)}
+    end.
+
+
+% Find the 'middle snake' of a diff, split the problem in two
 %%      and return the recursively constructed diff.
 %%      See Myers 1986 paper: An O(ND) Difference Algorithm and Its Variations.
 %%
@@ -1085,5 +1127,32 @@ text_smaller_than_test() ->
     ?assertEqual(false, text_smaller_than(<<149,157,112,8>>, 4)),
 
     ok.
+
+lines_to_chars_test() ->
+    ?assertEqual({<<>>, <<>>, []}, lines_to_chars(<<>>, <<>>)),
+
+    %% Simple text
+    ?assertEqual({<<1, 2>>, <<1, 3>>, [<<"hello\n">>, <<"world\n">>, <<"maas\n">>]}, 
+        lines_to_chars(<<"hello\n\world\n">>, <<"hello\nmaas\n">>)),
+
+    %% No newline at the end.
+    ?assertEqual({<<1, 2>>, <<1, 3>>, [<<"hello\n">>, <<"world\n">>, <<"maas">>]}, 
+        lines_to_chars(<<"hello\n\world\n">>, <<"hello\nmaas">>)),
+   
+    %% No newline at the end.
+    ?assertEqual({<<1, 2>>, <<1, 3>>, [<<"hello\n">>, <<"world\n">>, <<"maas">>]}, 
+        lines_to_chars(<<"hello\n\world\n">>, <<"hello\nmaas">>)),
+    
+    %% With empty lines 
+    ?assertEqual({<<1, 2, 3>>, <<1, 2, 4>>, [<<"hello\n">>, <<"\n">>, <<"world\n">>, <<"maas">>]}, 
+        lines_to_chars(<<"hello\n\nworld\n">>, <<"hello\n\nmaas">>)),
+
+    ok.
+
+compute_diff_linemode_test() ->
+    ?assertEqual([] , compute_diff_linemode(<<"hello\nworld\n">>, <<"hello\nmaas\n">>)),
+
+    ok.
+
 
 -endif.
