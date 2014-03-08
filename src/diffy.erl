@@ -23,6 +23,7 @@
 -export([
     diff/2,
     diff_bisect/2,
+    diff_linemode/2,
 
     pretty_html/1,
 
@@ -214,7 +215,7 @@ best_common(Long, Short, Seed, SeedLoc, Start,
                 true -> 
                     {half_match, BestLongA, BestLongB, BestShortA, BestShortB, BestCommon}
             end;
-        {MatchStart, Length} ->
+        {MatchStart, _} ->
             %% Because the seed is already at utf-8 boundaries this will work.
             <<LongPre:SeedLoc/binary, LongPost/binary>> = Long,
             <<ShortPre:MatchStart/binary, ShortPost/binary>> = Short,
@@ -270,15 +271,15 @@ seed(Long, Start) ->
 
 %% Line diff
 compute_diff1(Text1, Text2, true) ->
-    compute_diff_linemode(Text1, Text2);
+    diff_linemode(Text1, Text2);
 compute_diff1(Text1, Text2, false) when size(Text1) > 100 orelse size(Text2) > 100 ->
-    compute_diff_linemode(Text1, Text2);
+    diff_linemode(Text1, Text2);
 compute_diff1(Text1, Text2, false) ->
     diff_bisect(Text1, Text2).
 
 
 %% Compute diff in linemode
-compute_diff_linemode(Text1, Text2) ->
+diff_linemode(Text1, Text2) ->
     {CharText1, CharText2, Lines} = lines_to_chars(Text1, Text2),
     Diffs = diff(CharText1, CharText2, false),
 
@@ -583,7 +584,7 @@ cleanup_merge(Diffs) ->
 cleanup_merge([], Acc) ->
     lists:reverse(Acc);
 %% Remove operations without data.
-cleanup_merge([{Op, <<>>}|T], Acc) ->
+cleanup_merge([{_Op, <<>>}|T], Acc) ->
     cleanup_merge(T, Acc);
 %% Merge data from equal operations
 cleanup_merge([{Op2, Data2}|T], [{Op1, Data1}|Acc]) when Op1 =:= Op2 ->
@@ -704,7 +705,7 @@ make_patch(SourceText, DestinationText) when is_binary(SourceText) andalso is_bi
 make_patch(Diffs, SourceText) when is_list(Diffs) andalso is_binary(SourceText) ->
     make_patch(Diffs, SourceText, SourceText, 0, 0, [#patch{}]).
 
-make_patch([], _PrePatchText, _PostPatchText, Count1, Count2, [Patch|Rest]=Patches) ->
+make_patch([], _PrePatchText, _PostPatchText, _Count1, _Count2, [Patch|Rest]=Patches) ->
     case Patch#patch.diffs of
         [] -> 
             lists:reverse(Rest);
@@ -738,7 +739,7 @@ make_patch([{delete, Data}=D|T], PrePatchText, PostPatchText, Count1, Count2, [P
     
     make_patch(T, PrePatchText, NewPostPatchText, Count1+Size, Count2, [P|Rest]);
 
-make_patch([{equal, Data}=D|T], PrePatchText, PostPatchText, Count1, Count2, [Patch|Rest]) ->
+make_patch([{equal, Data}|T], PrePatchText, PostPatchText, Count1, Count2, [Patch|Rest]) ->
     Diffs = Patch#patch.diffs,
     Size = size(Data),
 
@@ -762,41 +763,6 @@ make_patch([{equal, Data}=D|T], PrePatchText, PostPatchText, Count1, Count2, [Pa
         
     make_patch(T, PrePatchText, PostPatchText, Count1+Size, Count2+Size, [P|Rest]).
 
-%%
-add_context(Patch, <<>>) ->
-    %% Nothing to add.
-    Patch;
-add_context(Patch, Text) ->
-    Diffs = Patch#patch.diffs,
-    
-    Start = Patch#patch.start2,
-    Length = Patch#patch.length1,
-
-    <<_:Start/binary, Pattern:Length/binary, _/binary>> = Text,
-
-    {Prefix, Suffix} = match_padding(Pattern, Text, Start, Length, text_size(Pattern)),
-
-    %% Add the suffix to the list of patches.
-    Patch1 = case Suffix of
-        <<>> -> Patch;
-        _ -> Patch#patch{diffs=[{equal, Suffix}|Diffs]}
-    end,
-
-    %% Roll back start and end points.
-
-    %% Extend the length (in bytes) of the patch.
-
-    throw(not_yet).
-
-
-match_padding(Pattern, Text, Start, BinLength, Utf8Length) ->
-    case unique_match(Pattern, Text) of
-        true ->
-            {<<>>, <<>>}; %% No padding was needed, we already have a unique pattern
-        false ->
-            %% increase the size of the pattern
-            throw(not_yet)
-    end.    
     
 % @doc Returns true iff Pattern is a unique match inside Text.
 unique_match(Pattern, Text) ->
@@ -1190,9 +1156,9 @@ lines_to_chars_test() ->
     ok.
 
 
-compute_diff_linemode_test() ->
+diff_linemode_test() ->
     ?assertEqual([{equal, <<"hello\n">>}, {delete, <<"world\n">>}, {insert, <<"maas\n">>}], 
-        compute_diff_linemode(<<"hello\nworld\n">>, <<"hello\nmaas\n">>)),
+        diff_linemode(<<"hello\nworld\n">>, <<"hello\nmaas\n">>)),
 
     ok.
 
