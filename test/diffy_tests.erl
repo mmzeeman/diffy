@@ -235,6 +235,11 @@ diff_test() ->
     ?assertEqual([{insert,<<"test">>},{delete,<<"x">>}],
         diffy:diff(<<"test">>, <<"x">>)),
 
+    ?assertEqual([{equal, <<"a">>}, {delete, <<"b">>}, {insert, <<"c">>}],
+        diffy:diff(<<"ab">>, <<"ac">>)),
+    ?assertEqual([{delete, <<"a">>}, {insert, <<"c">>}, {equal, <<"b">>}],
+        diffy:diff(<<"ab">>, <<"cb">>)),
+
     ?assertEqual([{equal, <<"t">>},
                   {insert, <<"e">>},
                   {equal, <<"st">>}], diffy:diff(<<"tst">>, <<"test">>)),

@@ -121,7 +121,7 @@ compute_diff(OldText, NewText, CheckLines) ->
         nomatch ->
             case single_char(ShortText) of
                 true ->
-                    case OldStNew of
+                    case size(OldText) =< size(NewText) of
                         true ->
                             [{delete, OldText}, {insert, NewText}];
                         false ->
@@ -135,7 +135,7 @@ compute_diff(OldText, NewText, CheckLines) ->
 diff_op(true) -> insert;
 diff_op(false) -> delete.
 
-%% 
+%% Check if we can do a half-match diff, if not, try line or bisect diff.  
 try_half_match(OldText, NewText, CheckLines) ->
     case half_match(OldText, NewText) of
         {half_match, A1, A2, B1, B2, Common} ->
@@ -146,7 +146,7 @@ try_half_match(OldText, NewText, CheckLines) ->
             compute_diff1(OldText, NewText, CheckLines)
     end.
 
-%%
+%% Check if we can do a half-match diff, returns undefined if it is not advantageous.
 half_match(A, B) ->
     AGtB = size(A) > size(B),
     {Short, Long} = case AGtB of
@@ -190,6 +190,7 @@ half_match(A, B) ->
     end.
 
 
+% Find the best common overlap at location I.
 half_match_i(Long, Short, I) ->
     {NewI, Seed} = seed(Long, I),
     case Seed of
@@ -201,6 +202,7 @@ half_match_i(Long, Short, I) ->
     end.
 
 
+%% Find the best common overlap inside two texts.
 best_common(Long, Short, Seed, SeedLoc, Start, 
         BestLongA, BestLongB, BestShortA, BestShortB, BestCommon) ->
     %% Check if we can find a match for Seed2 inside the shorttext.
@@ -255,7 +257,6 @@ next_char(Bin, Pos) ->
 seed(Long, Start) ->
     SeedSize = size(Long) div 4,
 
-
     %% Note, need to split on utf8 character boundary here.
     <<_Pre:Start/binary, Seed:SeedSize/binary, _Post/binary>> = Long,
 
@@ -267,7 +268,6 @@ seed(Long, Start) ->
     {Start - size(Pre), Seed2}.
 
 
-
 %% Line diff
 compute_diff1(Text1, Text2, true) ->
     compute_diff_linemode(Text1, Text2);
@@ -276,24 +276,53 @@ compute_diff1(Text1, Text2, false) when size(Text1) > 100 orelse size(Text2) > 1
 compute_diff1(Text1, Text2, false) ->
     diff_bisect(Text1, Text2).
 
-%%
+
+%% Compute diff in linemode
 compute_diff_linemode(Text1, Text2) ->
     {CharText1, CharText2, Lines} = lines_to_chars(Text1, Text2),
     Diffs = diff(CharText1, CharText2, false),
 
     %% Transform the diffs back to lines.
+    Diffs1 = chars_to_lines(Diffs, Lines),
 
-    throw(not_yet).
+    Cleaned = cleanup_merge(Diffs1),
+    cleanup_line_diff(Cleaned, <<>>, <<>>, [], []).
+
+
+%% Cleanup after a line based diff.
+%%
+cleanup_line_diff([], _, _, TmpAcc, Acc) ->
+    lists:reverse(TmpAcc ++ Acc);
+
+%% Concatenate the text found in insert and delete operations.
+cleanup_line_diff([{insert, Data}=I|Rest], DeleteData, InsertData, TmpAcc, Acc) ->
+    cleanup_line_diff(Rest, DeleteData, <<InsertData/binary, Data/binary>>, [I|TmpAcc], Acc);
+cleanup_line_diff([{delete, Data}=D|Rest], DeleteData, InsertData, TmpAcc, Acc) ->
+    cleanup_line_diff(Rest, <<DeleteData/binary, Data/binary>>, InsertData, [D|TmpAcc], Acc);
+
+%% Found an equal without a leading insert and delete operations. Just pass
+%% the operations
+cleanup_line_diff([{equal, _}=E|Rest], DeleteData, InsertData, TmpAcc, Acc) 
+	when DeleteData =:= <<>> orelse InsertData =:= <<>> ->
+    Acc1 = TmpAcc ++ Acc,
+    cleanup_line_diff(Rest, <<>>, <<>>, [], [E|Acc1]);
+
+%% Found leading insert and delete data, diff the texts and replace the operations.
+cleanup_line_diff([{equal, _}=E|Rest], DeleteData, InsertData, _TmpAcc, Acc) ->
+    %% rediff the delete and insert data.
+    Diffs = diff(DeleteData, InsertData, false),
+    Acc1 = lists:reverse(Diffs) ++ Acc,
+    cleanup_line_diff(Rest, <<>>, <<>>, [], [E|Acc1]).
 
 
 %% Diff lines
 lines_to_chars(Text1, Text2) ->
-    {CharText1, NextChar, Lines1, Dict1} = lines_to_chars(Text1, 0, <<>>, 1, [], dict:new()),
+    {CharText1, NextChar, Lines1, Dict1} = lines_to_chars(Text1, 0, <<>>, 0, [], dict:new()),
     {CharText2, _, Lines2, _Dict2} = lines_to_chars(Text2, 0, <<>>, NextChar, Lines1, Dict1),
 
     {CharText1, CharText2, lists:reverse(Lines2)}.
 
-
+% Transform each unique line into a single char
 lines_to_chars(Text, Idx, CharText, NextChar, Lines, D) when Idx >= size(Text) ->
     {CharText, NextChar, Lines, D};
 lines_to_chars(Text, Idx, CharText, NextChar, Lines, D) ->
@@ -320,6 +349,17 @@ insert_line(Line, Lines, Dict, NextChar) ->
         error ->
             {NextChar, NextChar+1, [Line|Lines], dict:store(Line, NextChar, Dict)}
     end.
+
+%%
+chars_to_lines(Diffs, Lines) when is_list(Lines) ->
+    A = array:from_list(Lines),
+    chars_to_lines(Diffs, A, []).
+
+chars_to_lines([], _A, Acc) ->
+    lists:reverse(Acc);
+chars_to_lines([{Op, Data}|Rest], LineArray, Acc) ->
+    Data1 = << <<(array:get(C, LineArray))/binary>> || <<C/utf8>> <= Data >>,
+    chars_to_lines(Rest, LineArray, [{Op, Data1}|Acc]).
 
 
 % Find the 'middle snake' of a diff, split the problem in two
@@ -1132,25 +1172,27 @@ lines_to_chars_test() ->
     ?assertEqual({<<>>, <<>>, []}, lines_to_chars(<<>>, <<>>)),
 
     %% Simple text
-    ?assertEqual({<<1, 2>>, <<1, 3>>, [<<"hello\n">>, <<"world\n">>, <<"maas\n">>]}, 
+    ?assertEqual({<<0, 1>>, <<0, 2>>, [<<"hello\n">>, <<"world\n">>, <<"maas\n">>]}, 
         lines_to_chars(<<"hello\n\world\n">>, <<"hello\nmaas\n">>)),
 
     %% No newline at the end.
-    ?assertEqual({<<1, 2>>, <<1, 3>>, [<<"hello\n">>, <<"world\n">>, <<"maas">>]}, 
+    ?assertEqual({<<0, 1>>, <<0, 2>>, [<<"hello\n">>, <<"world\n">>, <<"maas">>]}, 
         lines_to_chars(<<"hello\n\world\n">>, <<"hello\nmaas">>)),
    
     %% No newline at the end.
-    ?assertEqual({<<1, 2>>, <<1, 3>>, [<<"hello\n">>, <<"world\n">>, <<"maas">>]}, 
+    ?assertEqual({<<0, 1>>, <<0, 2>>, [<<"hello\n">>, <<"world\n">>, <<"maas">>]}, 
         lines_to_chars(<<"hello\n\world\n">>, <<"hello\nmaas">>)),
     
     %% With empty lines 
-    ?assertEqual({<<1, 2, 3>>, <<1, 2, 4>>, [<<"hello\n">>, <<"\n">>, <<"world\n">>, <<"maas">>]}, 
+    ?assertEqual({<<0, 1, 2>>, <<0, 1, 3>>, [<<"hello\n">>, <<"\n">>, <<"world\n">>, <<"maas">>]}, 
         lines_to_chars(<<"hello\n\nworld\n">>, <<"hello\n\nmaas">>)),
 
     ok.
 
+
 compute_diff_linemode_test() ->
-    ?assertEqual([] , compute_diff_linemode(<<"hello\nworld\n">>, <<"hello\nmaas\n">>)),
+    ?assertEqual([{equal, <<"hello\n">>}, {delete, <<"world\n">>}, {insert, <<"maas\n">>}], 
+        compute_diff_linemode(<<"hello\nworld\n">>, <<"hello\nmaas\n">>)),
 
     ok.
 
