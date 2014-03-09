@@ -18,3 +18,8 @@ Example
  {equal,<<" a banana">>}]
 ```
 
+## References
+
+Much good info about diff, match and patch can found at
+link: http://neil.fraser.name/writing/diff/
+
