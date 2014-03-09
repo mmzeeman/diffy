@@ -9,12 +9,12 @@ implementation uses binaries throughout and is utf-8 aware.
 
 Example
 
-'''erlang
+```erlang
 
 1> diffy:diff(<<"fruit flies like a banana">>, <<"fruit flies eat a banana">>)
 [{equal,<<"fruit flies ">>},
  {delete,<<"like">>},
  {insert,<<"eat">>},
  {equal,<<" a banana">>}]
-'''
+```
 
