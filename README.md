@@ -17,6 +17,11 @@ Example
  {insert,<<"eat">>},
  {equal,<<" a banana">>}]
 ```
+## TODO
+
+* cleanup_semantic(diffs()) -> diffs()
+* make_patch(Text1, Text2) -> patches(), make_patch(unicode_binary(), diffs()) -> patches(), make_patch(Diffs) -> patches()
+* match(Text, Pattern, Loc) 
 
 ## References
 
