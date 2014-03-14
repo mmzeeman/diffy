@@ -729,14 +729,14 @@ apply_compressed_diff(SourceText, Idx, [{insert, Data}|Rest], Acc) ->
     apply_compressed_diff(SourceText, Idx, Rest, [Data|Acc]);
 apply_compressed_diff(SourceText, Idx, [{equal, {Lines, Chars}}|Rest], Acc) ->
     LineData = get_lines(SourceText, Idx, Lines),
-    CharData = get_chars(SourceText, Idx + size(LineData), Chars),
+    CharData = get_chars(SourceText, Idx+size(LineData), Chars),
     %% Get the data from the source-text.
-    apply_compressed_diff(SourceText, Idx+size(LineData) + size(CharData), Rest, [CharData, LineData|Acc]);
+    apply_compressed_diff(SourceText, Idx+size(LineData)+size(CharData), Rest, [CharData, LineData|Acc]);
 apply_compressed_diff(SourceText, Idx, [{delete, {Lines, Chars}}|Rest], Acc) ->
     LineData = get_lines(SourceText, Idx, Lines),
-    CharData = get_chars(SourceText, Idx + size(LineData), Chars),
+    CharData = get_chars(SourceText, Idx+size(LineData), Chars),
     %% Advance the index
-    apply_compressed_diff(SourceText, Idx + size(LineData) + size(CharData), Rest, Acc).
+    apply_compressed_diff(SourceText, Idx+size(LineData)+size(CharData), Rest, Acc).
 
 %% Get the data from N lines.
 get_lines(Source, Idx, Lines) ->
@@ -745,13 +745,14 @@ get_lines(Source, Idx, Lines) ->
 get_lines(Source, Idx, 0, Acc) ->
     Acc;
 get_lines(Source, Idx, Lines, Acc) ->
+    
     case binary:match(Source, <<"\n">>, [{scope, {Idx, size(Source) - Idx}}]) of
         nomatch ->
             Acc;
         {Start, _} ->
             LineSize = Start-Idx+1,
             <<_:Idx/binary, Line:LineSize/binary, Rest/binary>> = Source,
-            get_lines(Source, Start+1, Lines-1, <<Rest/binary, Line/binary>>)
+            get_lines(Source, Start+1, Lines-1, <<Acc/binary, Line/binary>>)
     end.
 
 %% @doc Get the chardata for NChars from Source.
@@ -1272,22 +1273,26 @@ count_lines_test() ->
 
 get_lines_test() ->
     ?assertEqual(<<"hoi\n">>, get_lines(<<"hoi\n">>, 0, 1)),
+    ?assertEqual(<<"hoi\n\n">>, get_lines(<<"hoi\n\n">>, 0, 2)),
+    ?assertEqual(<<"oi\n\n">>, get_lines(<<"hoi\n\n">>, 1, 2)),
     ok.
 
 get_chars_test() ->
-    io:fwrite(standard_error, "compressed ~p~n", [Compressed]),
     ?assertEqual(<<"h">>, get_chars(<<"hoi\n">>, 0, 1)),
     ?assertEqual(<<"oi">>, get_chars(<<"hoi\n">>, 1, 2)),
+    ?assertEqual(<<"i\n">>, get_chars(<<"hoi\n">>, 2, 2)),
     ok.
 
 apply_compressed_diff_test() ->
-    Diffs = diff(<<"the cat is in the hat\n">>, <<"the rabbit is in the hat\n">>),
+    A = <<"the cat\n\n   is in the hat\n">>,
+    B = <<"the rabbit eats\n\n a carrot\n  in the hat\n">>,
+
+    Diffs = diff(A, B),
     CDiffs = cleanup_efficiency(Diffs),
     Compressed = compress_diff(CDiffs),
 
     %% Check if the transformation worked.
-    ?assertEqual(<<"the rabbit is in the hat\n">>, 
-        erlang:iolist_to_binary(apply_compressed_diff(<<"the cat is in the hat\n">>, Compressed))),
+    ?assertEqual(B, erlang:iolist_to_binary(apply_compressed_diff(A, Compressed))),
 
     ok.
 
