@@ -724,7 +724,7 @@ apply_compressed_diff(SourceText, Diffs) ->
     apply_compressed_diff(SourceText, 0, Diffs, []).
 
 apply_compressed_diff(SourceText, Idx, [], Acc) ->
-    lists:reverse(Acc);
+    erlang:iolist_to_binary(lists:reverse(Acc));
 apply_compressed_diff(SourceText, Idx, [{insert, Data}|Rest], Acc) ->
     apply_compressed_diff(SourceText, Idx, Rest, [Data|Acc]);
 apply_compressed_diff(SourceText, Idx, [{equal, {Lines, Chars}}|Rest], Acc) ->
