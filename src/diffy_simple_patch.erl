@@ -30,49 +30,35 @@ make_patch(Diffs) ->
 
 %% @doc Make a simple patch. Removes the data from equal and delete 
 %% operations and replaces it with a line and char count.
-make_patch([], [{copy, _, _}]) ->
+make_patch([], [{copy, _}]) ->
     [];
 make_patch([], Acc) ->
     lists:reverse(Acc);
 make_patch([{insert, _}=H|Rest], Acc) ->
     make_patch(Rest, [H|Acc]);
 make_patch([{Op, Data}|Rest], Acc) ->
-    {NoLines, NoChars} = count_lines(Data),
-    make_patch(Rest, [{patch_op(Op), NoLines, NoChars}|Acc]).
+    make_patch(Rest, [{patch_op(Op), size(Data)}|Acc]).
 
 patch_op(delete) -> skip;
 patch_op(equal) -> copy.
-
-%% @doc Return a tuple {NumberOfLines, NumberOfRemainderCharacters}
-count_lines(Bin) ->
-    count_lines(Bin, 0, 0, 0).
-
-count_lines(Bin, Idx, Lines, Chars) when Idx > size(Bin) ->
-    {Lines, Chars};
-count_lines(Bin, Idx, Lines, Chars) ->
-    case binary:match(Bin, <<"\n">>, [{scope, {Idx, size(Bin) - Idx}}]) of
-        nomatch ->
-            <<_:Idx/binary, Rest/binary>> = Bin,
-            {Lines, count_chars(Rest, 0)};
-        {Start, _} ->
-            count_lines(Bin, Start+1, Lines+1, Chars)
-    end.
-
-%% @doc Return the number of remainder characters
-count_chars(<<>>, Count) ->
-    Count;
-count_chars(<<_C/utf8, Rest/binary>>, Count) ->
-    count_chars(Rest, Count+1).
-
 
 % @doc Use the SourceText to reconstruct the destination text.
 apply_patch(SourceText, Diffs) ->
     apply_patch(SourceText, 0, Diffs, []).
 
-apply_patch(SourceText, Idx, [], Acc) ->
+apply_patch(_SourceText, _Idx, [], Acc) ->
     erlang:iolist_to_binary(lists:reverse(Acc));
 apply_patch(SourceText, Idx, [{insert, Data}|Rest], Acc) ->
     apply_patch(SourceText, Idx, Rest, [Data|Acc]);
+
+%% New simple interface, just use the binary length.
+apply_patch(SourceText, Idx, [{copy, BinLen}|Rest], Acc) ->
+    <<_:Idx/binary, Data:BinLen/binary, _Rest/binary>> = SourceText,
+    apply_patch(SourceText, Idx+BinLen, Rest, [Data|Acc]);
+apply_patch(SourceText, Idx, [{skip, BinLen}|Rest], Acc) ->
+    apply_patch(SourceText, Idx+BinLen, Rest, Acc);
+
+%% Old interface which counts lines and remaining chars.
 apply_patch(SourceText, Idx, [{copy, Lines, Chars}|Rest], Acc) ->
     LineData = get_lines(SourceText, Idx, Lines),
     CharData = get_chars(SourceText, Idx+size(LineData), Chars),
@@ -88,7 +74,7 @@ apply_patch(SourceText, Idx, [{skip, Lines, Chars}|Rest], Acc) ->
 get_lines(Source, Idx, Lines) ->
     get_lines(Source, Idx, Lines, <<>>).
 
-get_lines(Source, Idx, 0, Acc) ->
+get_lines(_Source, _Idx, 0, Acc) ->
     Acc;
 get_lines(Source, Idx, Lines, Acc) ->
     case binary:match(Source, <<"\n">>, [{scope, {Idx, size(Source) - Idx}}]) of
@@ -96,7 +82,7 @@ get_lines(Source, Idx, Lines, Acc) ->
             Acc;
         {Start, _} ->
             LineSize = Start-Idx+1,
-            <<_:Idx/binary, Line:LineSize/binary, Rest/binary>> = Source,
+            <<_:Idx/binary, Line:LineSize/binary, _Rest/binary>> = Source,
             get_lines(Source, Start+1, Lines-1, <<Acc/binary, Line/binary>>)
     end.
 
@@ -104,7 +90,7 @@ get_lines(Source, Idx, Lines, Acc) ->
 get_chars(Source, Idx, Chars) ->
     get_chars(Source, Idx, Chars, <<>>).
 
-get_chars(Source, Idx, 0, CharData) ->
+get_chars(_Source, _Idx, 0, CharData) ->
     CharData;
 get_chars(Source, Idx, Chars, CharData) ->
     <<_:Idx/binary, C/utf8, _/binary>> = Source,
@@ -123,18 +109,8 @@ get_chars(Source, Idx, Chars, CharData) ->
 make_patch_test() ->
     ?assertEqual([], make_patch([])),
     ?assertEqual([], make_patch([{equal, <<"foo">>}])),
-    ?assertEqual([{copy, 1, 0}, {insert, <<"test">>}], 
+    ?assertEqual([{copy, 4}, {insert, <<"test">>}], 
             make_patch([{equal, <<"foo\n">>}, {insert, <<"test">>}])),
-
-    ok.
-
-count_lines_test() ->
-    ?assertEqual({1, 0}, count_lines(<<"hoi\n">>)),
-    ?assertEqual({2, 0}, count_lines(<<"hoi\ndaar\n">>)),
-    ?assertEqual({3, 0}, count_lines(<<"\n\n\n">>)),
-    ?assertEqual({0, 0}, count_lines(<<"">>)),
-    ?assertEqual({0, 3}, count_lines(<<"hoi">>)),
-    ?assertEqual({1, 5}, count_lines(<<"hoi\r\ndaar", 200/utf8>>)),
 
     ok.
 
@@ -159,6 +135,7 @@ apply_patch_test() ->
     Patch = make_patch(CDiffs),
 
     %% Check if the transformation worked.
+    %%
     ?assertEqual(B, erlang:iolist_to_binary(apply_patch(A, Patch))),
 
     ok.
