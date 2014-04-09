@@ -52,10 +52,10 @@ apply_patch(SourceText, Idx, [{insert, Data}|Rest], Acc) ->
     apply_patch(SourceText, Idx, Rest, [Data|Acc]);
 
 %% New simple interface, just use the binary length.
-apply_patch(SourceText, Idx, [{copy, BinLen}|Rest], Acc) when Idx + BinLen =< SourceText ->
+apply_patch(SourceText, Idx, [{copy, BinLen}|Rest], Acc) when Idx + BinLen =< size(SourceText) ->
     <<_:Idx/binary, Data:BinLen/binary, _Rest/binary>> = SourceText,
     apply_patch(SourceText, Idx+BinLen, Rest, [Data|Acc]);
-apply_patch(SourceText, Idx, [{skip, BinLen}|Rest], Acc) when Idx + BinLen =< SourceText ->
+apply_patch(SourceText, Idx, [{skip, BinLen}|Rest], Acc) when Idx + BinLen =< size(SourceText) ->
     apply_patch(SourceText, Idx+BinLen, Rest, Acc);
 
 %% Old interface which counts lines and remaining chars.
