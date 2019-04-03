@@ -388,13 +388,14 @@ diff_bisect(A, B) when is_binary(A) andalso is_binary(B) ->
 
 compute_diff_bisect1(A, B, M, N) ->
     %% TODO, add deadline... 
-    MaxD = (M + N) div 2,
+    
+    MaxD = ceil((M + N) / 2),
 
     VOffset = MaxD,
     VLength = 2 * MaxD,
 
-    V1 = array:new(VLength, [{default, -1}]),
-    V2 = array:set(VOffset + 1, 0, V1),
+    V1 = array:set(VOffset + 1, 0, array:new(VLength, [{default, -1}])),
+    %V2 = array:set(VOffset + 1, 0, array:new(VLength, [{default, -1}])),
     
     Delta = M - N,
 
@@ -403,7 +404,7 @@ compute_diff_bisect1(A, B, M, N) ->
     Front = (Delta rem 2 =/= 0),
 
     %% {K1Start, K1End, K2Start, K2End, V1, V2}
-    State = #bisect_state{v1=V2, v2=V2},
+    State = #bisect_state{v1=V1, v2=V1},
 
     %% Loops
     for(0, MaxD, fun(D, S1) ->
@@ -432,20 +433,25 @@ compute_diff_bisect1(A, B, M, N) ->
                     {continue, S2_1#bisect_state{k1start=V}};
                 Front ->
                     K2Offset = VOffset + Delta - K1,
-                    V2AtOffset = array:get(K2Offset, S2_1#bisect_state.v2),
-                    case K2Offset >= 0 andalso K2Offset < VLength andalso V2AtOffset =/= -1 of
+                    case K2Offset < 0 andalso K2Offset >= VLength of
                         true ->
-                            % Mirror x2 onto top-left coordinate system.
-                            X2 = M - V2AtOffset,
-                            if 
-                                X1_1 >= X2 ->
-                                    % Overlap detected
-                                    throw({overlap, A, B, X1_1, Y1_1});
-                                true ->
-                                    {continue, S2_1}
-                            end;
+                            {continue, S2_1};
                         false ->
-                            {continue, S2_1}
+                            V2AtOffset = array:get(K2Offset, S2_1#bisect_state.v2),
+                            case V2AtOffset =/= -1 of
+                                true ->
+                                    % Mirror x2 onto top-left coordinate system.
+                                    X2 = M - V2AtOffset,
+                                    if 
+                                        X1_1 >= X2 ->
+                                            % Overlap detected
+                                            throw({overlap, A, B, X1_1, Y1_1});
+                                        true ->
+                                            {continue, S2_1}
+                                    end;
+                                false ->
+                                    {continue, S2_1}
+                            end
                     end;
                 true ->
                     {continue, S2_1}
@@ -479,21 +485,26 @@ compute_diff_bisect1(A, B, M, N) ->
                     {continue, S4_1#bisect_state{k2start=V}};
                 Front ->
                     K1Offset = VOffset + Delta - K2,
-                    V1AtOffset = array:get(K1Offset, S4_1#bisect_state.v1),
-                    case K1Offset >= 0 andalso K1Offset < VLength andalso V1AtOffset =/= -1 of
+                    case K1Offset < 0 andalso K1Offset >= VLength of
                         true ->
-                            X1 = V1AtOffset,
-                            Y1 = VOffset + X1 - K1Offset,
-                            if 
-                                % Mirror x2 onto top-left coordinate system.
-                                X1 >= M - X2_1 ->
-                                    % Overlap detected
-                                    throw({overlap, A, B, X1, Y1});
-                                true ->
-                                    {continue, S4_1}
-                            end;
+                            {continue, S4_1};
                         false ->
-                            {continue, S4_1}
+                            V1AtOffset = array:get(K1Offset, S4_1#bisect_state.v1),
+                            case V1AtOffset =/= -1 of
+                                true ->
+                                    X1 = V1AtOffset,
+                                    Y1 = VOffset + X1 - K1Offset,
+                                    if 
+                                        % Mirror x2 onto top-left coordinate system.
+                                        X1 >= M - X2_1 ->
+                                            % Overlap detected
+                                            throw({overlap, A, B, X1, Y1});
+                                        true ->
+                                            {continue, S4_1}
+                                    end;
+                                false ->
+                                    {continue, S4_1}
+                            end
                     end;
                 true ->
                     {continue, S4_1}
@@ -973,6 +984,7 @@ repair_head(Bin) ->
     %% Illegal sequence, can't repair it.
     {<<>>, Bin}.
 
+
 %%
 %% Tests
 %%
@@ -1161,6 +1173,5 @@ diff_linemode_test() ->
         diff_linemode(<<"hello\nworld\n">>, <<"hello\nmaas\n">>)),
 
     ok.
-
 
 -endif.
