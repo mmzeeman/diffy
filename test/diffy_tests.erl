@@ -51,6 +51,44 @@ prop_cleanup_efficiency() ->
             DestinationText == diffy:destination_text(EfficientDiffs)
         end).
 
+html_like() ->
+    proper_types:resize(200,
+                        list(frequency([{80, range($a, $z)},       % letters
+                                        {20, oneof(["&amp;", "&gt;", "<script>", "<br />", "<p>", "</p>", "<div>", "</div>"])}, % tags
+                                        {2, range(16#80, 16#7FF)}, % a couple of 2-byte unicode chars
+                                        {2, range($0, $9)},        % numbers
+                                        {2, $\s},                  % whitespace
+                                        {4,  $\n},                 % linebreaks
+                                        {2, oneof([$., $-, $!, $?, $,])}   % punctuation
+                                       ]))).
+
+prop_make_diff() ->
+    ?FORALL({S, D}, {html_like(), html_like()},
+        begin
+            SourceText = unicode:characters_to_binary(lists:flatten(S), utf32, utf8),
+            DestinationText = unicode:characters_to_binary(lists:flatten(D), utf32, utf8),
+
+            Patches = diffy:diff(SourceText, DestinationText),
+
+            SourceText == diffy:source_text(Patches) andalso DestinationText == diffy:destination_text(Patches)
+        end).
+
+prop_inner_diff() ->
+    ?FORALL({OP, IO, IN, OS}, {html_like(), html_like(), html_like(), html_like()},
+        begin
+            OuterPrefix = unicode:characters_to_binary(lists:flatten(OP), utf32, utf8),
+            InnerOld = unicode:characters_to_binary(lists:flatten(IO), utf32, utf8),
+            InnerNew = unicode:characters_to_binary(lists:flatten(IN), utf32, utf8),
+            OuterSuffix = unicode:characters_to_binary(lists:flatten(OS), utf32, utf8),
+
+            SourceText = <<OuterPrefix/binary, InnerOld/binary, OuterSuffix/binary>>,
+            DestinationText = <<OuterPrefix/binary, InnerNew/binary, OuterSuffix/binary>>,
+
+            Patches = diffy:diff(SourceText, DestinationText),
+
+            SourceText == diffy:source_text(Patches) andalso DestinationText == diffy:destination_text(Patches)
+        end).
+
 %%
 %% Tests
 %%
@@ -177,6 +215,14 @@ cleanup_efficiency_prop_test() ->
     ?assertEqual(true, proper:quickcheck(prop_cleanup_efficiency(), [{numtests, 500}, {to_file, user}])),
     ok.
 
+random_diffs_prop_test() ->
+    ?assertEqual(true, proper:quickcheck(prop_make_diff(), [{numtests, 500}, {to_file, user}])),
+    ok.
+
+random_inner_diff_prop_test() ->
+    ?assertEqual(true, proper:quickcheck(prop_inner_diff(), [{numtests, 500}, {to_file, user}])),
+    ok.
+
 cleanup_efficiency_test() ->
     % Null case
     ?assertEqual([], cleanup_semantic([])),
@@ -232,7 +278,7 @@ diff_test() ->
     %% Single char insertions
     ?assertEqual([{delete,<<"x">>},{insert,<<"test">>}],
         diffy:diff(<<"x">>, <<"test">>)),
-    ?assertEqual([{insert,<<"test">>},{delete,<<"x">>}],
+    ?assertEqual([{delete, <<"test">>},{insert, <<"x">>}],
         diffy:diff(<<"test">>, <<"x">>)),
 
     ?assertEqual([{equal, <<"a">>}, {delete, <<"b">>}, {insert, <<"c">>}],
@@ -243,6 +289,10 @@ diff_test() ->
     ?assertEqual([{equal, <<"t">>},
                   {insert, <<"e">>},
                   {equal, <<"st">>}], diffy:diff(<<"tst">>, <<"test">>)),
+
+    ?assertEqual([{equal,<<"cat ">>}, {insert,<<"mouse dog ">>}], 
+                 diffy:diff(<<"cat ">>,
+                            <<"cat mouse dog ">>)),
     ok.
 
 
