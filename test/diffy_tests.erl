@@ -51,6 +51,14 @@ prop_cleanup_efficiency() ->
             DestinationText == diffy:destination_text(EfficientDiffs)
         end).
 
+prop_make_diff() ->
+    ?FORALL({SourceText, DestinationText}, {binary(), binary()},
+        begin
+            Patches = diffy:diff(SourceText, DestinationText),
+
+            SourceText == diffy:source_text(Patches) andalso DestinationText == diffy:destination_text(Patches)
+        end).
+
 %%
 %% Tests
 %%
@@ -177,6 +185,10 @@ cleanup_efficiency_prop_test() ->
     ?assertEqual(true, proper:quickcheck(prop_cleanup_efficiency(), [{numtests, 500}, {to_file, user}])),
     ok.
 
+random_diffs_prop_test() ->
+    ?assertEqual(true, proper:quickcheck(prop_make_diff(), [{numtests, 500}, {to_file, user}])),
+    ok.
+
 cleanup_efficiency_test() ->
     % Null case
     ?assertEqual([], cleanup_semantic([])),
@@ -232,7 +244,7 @@ diff_test() ->
     %% Single char insertions
     ?assertEqual([{delete,<<"x">>},{insert,<<"test">>}],
         diffy:diff(<<"x">>, <<"test">>)),
-    ?assertEqual([{insert,<<"test">>},{delete,<<"x">>}],
+    ?assertEqual([{delete, <<"test">>},{insert, <<"x">>}],
         diffy:diff(<<"test">>, <<"x">>)),
 
     ?assertEqual([{equal, <<"a">>}, {delete, <<"b">>}, {insert, <<"c">>}],
@@ -244,11 +256,9 @@ diff_test() ->
                   {insert, <<"e">>},
                   {equal, <<"st">>}], diffy:diff(<<"tst">>, <<"test">>)),
 
-    %?assertEqual([], diffy:diff(<<"cat ">>, <<"cat mouse dog ">>)),
-    P = diffy:diff(<<"cat ">>, <<"cat mouse dog ">>),
-    ?assertEqual(<<"cat ">>, diffy:source_text(P)),
-    ?assertEqual(<<"cat mouse dog ">>, diffy:destination_text(P)),
-
+    ?assertEqual([{equal,<<"cat ">>}, {insert,<<"mouse dog ">>}], 
+                 diffy:diff(<<"cat ">>,
+                            <<"cat mouse dog ">>)),
     ok.
 
 

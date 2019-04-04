@@ -124,12 +124,7 @@ compute_diff(OldText, NewText, CheckLines) ->
         nomatch ->
             case single_char(ShortText) of
                 true ->
-                    case size(OldText) =< size(NewText) of
-                        true ->
-                            [{delete, OldText}, {insert, NewText}];
-                        false ->
-                            [{insert, OldText}, {delete, NewText}]
-                    end;
+                    [{delete, OldText}, {insert, NewText}];
                 false ->
                     try_half_match(OldText, NewText, CheckLines)
              end
@@ -431,11 +426,10 @@ compute_diff_bisect1(A, B, M, N) ->
                     % Ran off the bottom of the graph...
                     V = S2_1#bisect_state.k1start + 2,
                     {continue, S2_1#bisect_state{k1start=V}};
-                Front ->
+                Front =:= true ->
                     K2Offset = VOffset + Delta - K1,
                     case K2Offset < 0 orelse K2Offset >= VLength of
-                        true ->
-                            {continue, S2_1};
+                        true -> {continue, S2_1};
                         false ->
                             V2AtOffset = array:get(K2Offset, S2_1#bisect_state.v2),
                             case V2AtOffset =/= -1 of
@@ -445,17 +439,14 @@ compute_diff_bisect1(A, B, M, N) ->
                                     if 
                                         X1_1 >= X2 ->
                                             % Overlap detected
-                                            io:fwrite(standard_error, "Overlap~n", []),
                                             throw({overlap, A, B, X1_1, Y1_1});
                                         true ->
                                             {continue, S2_1}
                                     end;
-                                false ->
-                                    {continue, S2_1}
+                                false -> {continue, S2_1}
                             end
                     end;
-                true ->
-                    {continue, S2_1}
+                true -> {continue, S2_1}
             end
         end, S1),
 
@@ -484,11 +475,10 @@ compute_diff_bisect1(A, B, M, N) ->
                     % Ran off the bottom of the graph...
                     V = S4_1#bisect_state.k2start + 2,
                     {continue, S4_1#bisect_state{k2start=V}};
-                Front ->
+                Front =:= false ->
                     K1Offset = VOffset + Delta - K2,
                     case K1Offset < 0 orelse K1Offset >= VLength of
-                        true ->
-                            {continue, S4_1};
+                        true -> {continue, S4_1};
                         false ->
                             V1AtOffset = array:get(K1Offset, S4_1#bisect_state.v1),
                             case V1AtOffset =/= -1 of
@@ -499,17 +489,14 @@ compute_diff_bisect1(A, B, M, N) ->
                                         % Mirror x2 onto top-left coordinate system.
                                         X1 >= M - X2_1 ->
                                             % Overlap detected
-                                            io:fwrite(standard_error, "Overlap----1~n", []),
                                             throw({overlap, A, B, X1, Y1});
                                         true ->
                                             {continue, S4_1}
                                     end;
-                                false ->
-                                    {continue, S4_1}
+                                false -> {continue, S4_1}
                             end
                     end;
-                true ->
-                    {continue, S4_1}
+                true -> {continue, S4_1}
             end
         end, S3),
         {continue, S5}
@@ -1071,14 +1058,26 @@ diff_bisect_test() ->
                   {equal,<<" a banana">>}], diff_bisect(<<"fruit flies like a banana">>, 
                                                         <<"fruit flies eat a banana">>)),
 
-    ?assertEqual([{delete,<<"cat">>},
-                  {insert,<<"map">>}], diff_bisect(<<"cat">>, <<"map">>)), 
+
+    %?assertEqual([{delete,<<"cat">>},
+    %              {insert,<<"map">>}], diff_bisect(<<"cat">>, <<"map">>)), 
+
+    ?assertEqual([{delete,<<"c">>},
+                  {insert,<<"m">>},
+                  {equal,<<"a">>},
+                  {delete,<<"t">>},
+                  {insert,<<"p">>}],
+                  diff_bisect(<<"cat">>, <<"map">>)), 
 
     ?assertEqual([{equal,<<"cat ">>},
                   {insert,<<"mouse dog sheep ">>},
                   {insert,<<"monkey chicken ">>},
                   {equal,<<"zebra">>}
                  ], diff_bisect(<<"cat zebra">>, <<"cat mouse dog sheep monkey chicken zebra">>)), 
+
+    ?assertEqual([{equal, <<"text">>}],
+                 diff_bisect(<<"text">>, <<"text">>)),
+                 
 
     ok.
 
@@ -1117,11 +1116,13 @@ half_match_test() ->
 common_prefix_test() ->
     ?assertEqual(<<>>, common_prefix(<<"Text">>, <<"Next">>)),
     ?assertEqual(<<"T">>, common_prefix(<<"Text">>, <<"Tax">>)),
+    ?assertEqual(<<"text">>, common_prefix(<<"text">>, <<"text">>)),
     ok.
 
 common_suffix_test() ->
     ?assertEqual(<<"ext">>, common_suffix(<<"Text">>, <<"Next">>)),
     ?assertEqual(<<>>, common_suffix(<<"Text">>, <<"Tax">>)),
+    ?assertEqual(<<"text">>, common_suffix(<<"text">>, <<"text">>)),
     ok.
 
 split_pre_and_suffix_test() ->
