@@ -247,7 +247,7 @@ diff_test() ->
     %?assertEqual([], diffy:diff(<<"cat ">>, <<"cat mouse dog ">>)),
     P = diffy:diff(<<"cat ">>, <<"cat mouse dog ">>),
     ?assertEqual(<<"cat ">>, diffy:source_text(P)),
-    ?assertEqual(<<"cat mouse dog ">>, diffy:source_text(P)),
+    ?assertEqual(<<"cat mouse dog ">>, diffy:destination_text(P)),
 
     ok.
 

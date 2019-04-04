@@ -41,7 +41,9 @@
     make_patch/1,
     make_patch/2,
 
-    text_size/1
+    text_size/1,
+
+    split_pre_and_suffix/2
 ]).
 
 -type diff_op() :: delete | equal | insert.
@@ -85,9 +87,7 @@ diff(<<>>, <<>>, _CheckLines) ->
 diff(Text1, Text2, _CheckLines) when Text1 =:= Text2 ->
     [{equal, Text1}];
 diff(Text1, Text2, CheckLines) ->
-    {Prefix, MText1, MText2, Suffix}=X = split_pre_and_suffix(Text1, Text2),
-
-    io:fwrite(standard_error, "split: (~p, ~p) ~p~n", [Text1, Text2, X]),
+    {Prefix, MText1, MText2, Suffix} = split_pre_and_suffix(Text1, Text2),
 
     Diffs = compute_diff(MText1, MText2, CheckLines),
 
@@ -525,14 +525,8 @@ diff_bisect_split(A, B, X, Y) ->
     B1 = binary_from_array(X, array:size(A), A),
     B2 = binary_from_array(Y, array:size(B), B),
 
-    io:fwrite(standard_error, "A1: ~p, A2: ~p~n", [A1, A2]),
-    io:fwrite(standard_error, "B1: ~p, B2: ~p~n", [B1, B2]),
-
     Diffs = diff(A1, A2, false),
     DiffsB = diff(B1, B2, false),
-
-    io:fwrite(standard_error, "Diffs A: ~p, ~p-~p~n", [Diffs, source_text(Diffs), destination_text(Diffs)]),
-    io:fwrite(standard_error, "Diffs B: ~p, ~p-~p~n", [DiffsB, source_text(DiffsB), destination_text(DiffsB)]),
 
     Diffs ++ DiffsB.
 
@@ -860,10 +854,16 @@ for(From, To, Step, Fun, State) ->
         
 split_pre_and_suffix(Text1, Text2) ->
     Prefix = common_prefix(Text1, Text2),
-    Suffix = common_suffix(Text1, Text2),
+    PrefixLen = size(Prefix),
 
-    MiddleText1 = binary:part(Text1, size(Prefix), size(Text1) - size(Prefix) - size(Suffix)), 
-    MiddleText2 = binary:part(Text2, size(Prefix), size(Text2) - size(Prefix) - size(Suffix)), 
+    <<_:PrefixLen/binary, TailText1/binary>> = Text1,
+    <<_:PrefixLen/binary, TailText2/binary>> = Text2,
+
+    Suffix = common_suffix(TailText1, TailText2),
+    SuffixLen = size(Suffix),
+
+    MiddleText1 = binary:part(TailText1, 0, size(TailText1) - SuffixLen), 
+    MiddleText2 = binary:part(TailText2, 0, size(TailText2) - SuffixLen), 
 
     {Prefix, MiddleText1, MiddleText2, Suffix}.
 
@@ -1075,17 +1075,10 @@ diff_bisect_test() ->
                   {insert,<<"map">>}], diff_bisect(<<"cat">>, <<"map">>)), 
 
     ?assertEqual([{equal,<<"cat ">>},
-                  {insert,<<"mouse">>},
-                  {equal,<<" ">>},
-                  {insert,<<"dog sheep">>},
-                  {equal,<<" ">>},
+                  {insert,<<"mouse dog sheep ">>},
                   {insert,<<"monkey chicken ">>},
                   {equal,<<"zebra">>}
                  ], diff_bisect(<<"cat zebra">>, <<"cat mouse dog sheep monkey chicken zebra">>)), 
-
-    P = diff_bisect(<<"cat zebra">>, <<"cat mouse dog sheep monkey chicken zebra">>), 
-    io:fwrite(standard_error, "~p~n", [source_text(P)]),
-    io:fwrite(standard_error, "~p~n", [destination_text(P)]),
 
     ok.
 
@@ -1143,8 +1136,8 @@ split_pre_and_suffix_test() ->
     ?assertEqual({<<"aa">>, <<"bb">>, <<"c">>, <<"dd">>}, 
        split_pre_and_suffix(<<"aabbdd">>, <<"aacdd">>)),
 
-
-    ?assertEqual({}, split_pre_and_suffix(<<"cat ">>, <<"cat mouse dog ">>)),
+    ?assertEqual({<<"cat ">>, <<>>, <<"mouse dog ">>, <<>>},
+                 split_pre_and_suffix(<<"cat ">>, <<"cat mouse dog ">>)),
 
     ok. 
 
