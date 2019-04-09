@@ -385,7 +385,7 @@ diff_bisect(A, B) when is_binary(A) andalso is_binary(B) ->
 compute_diff_bisect1(A, B, M, N) ->
     %% TODO, add deadline... 
     
-    MaxD = ceil((M + N) / 2),
+    MaxD = int_ceil((M + N) / 2),
 
     VOffset = MaxD,
     VLength = 2 * MaxD,
@@ -981,6 +981,16 @@ repair_head(Bin) ->
     %% Illegal sequence, can't repair it.
     {<<>>, Bin}.
 
+
+%% This function can go away when we support OTP 20 and up.
+%%
+int_ceil(Number) ->
+    T = trunc(Number),
+    case (Number - T) of
+        Neg when Neg < 0 -> T;
+        Pos when Pos > 0 -> T + 1;
+        _ -> T
+    end.
 
 %%
 %% Tests
