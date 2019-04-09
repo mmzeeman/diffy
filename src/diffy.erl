@@ -43,7 +43,8 @@
 
     text_size/1,
 
-    split_pre_and_suffix/2
+    split_pre_and_suffix/2,
+    unique_match/2
 ]).
 
 -type diff_op() :: delete | equal | insert.
